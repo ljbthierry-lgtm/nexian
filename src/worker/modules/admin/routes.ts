@@ -1,11 +1,13 @@
 /** Admin: staff accounts, the skill and industry lists, and GDPR housekeeping. */
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { z } from "zod";
 import type { AppContext } from "../../env";
-import { ACCESS_LABEL, type AccessAction } from "../../lib/accessLog";
+import { ACCESS_ACTIONS, ACCESS_LABEL, type AccessAction, recordAccess } from "../../lib/accessLog";
 import { resolveBaseUrl } from "../../lib/baseUrl";
+import { toCsv } from "../../lib/csv";
 import { all, first, run, uid } from "../../lib/db";
 import { badRequest, notFound } from "../../lib/errors";
+import { clientIp } from "../../lib/rateLimit";
 import { requireAuth, requireRole } from "../../middleware/auth";
 import { sendEmail } from "../notifications/resend";
 import { setPasswordEmail } from "../notifications/templates";
@@ -237,18 +239,72 @@ adminRoutes.get("/email-log", async (c) => {
  * deliberately does not include it — telling a data subject which colleague
  * opened their file would expose internal operations without helping them.
  */
-adminRoutes.get("/access-log", async (c) => {
-  const contactId = c.req.query("contactId");
-  const rows = await all<Record<string, unknown>>(
+interface AccessLogRow {
+  id: string;
+  user_id: string | null;
+  user_name: string;
+  action: AccessAction;
+  contact_id: string | null;
+  detail: string | null;
+  ip: string | null;
+  created_at: string;
+  first_name: string | null;
+  last_name: string | null;
+}
+
+/**
+ * Read the log, narrowed the way somebody investigating actually narrows it:
+ * by person, by what they did, by when, or by whose record was touched.
+ */
+async function queryAccessLog(c: Context<AppContext>, limit: number): Promise<AccessLogRow[]> {
+  const q = c.req.query();
+  const where: string[] = [];
+  const params: unknown[] = [];
+
+  if (q.contactId) {
+    where.push("a.contact_id = ?");
+    params.push(q.contactId);
+  }
+  if (q.userId) {
+    where.push("a.user_id = ?");
+    params.push(q.userId);
+  }
+  if (q.action && ACCESS_ACTIONS.includes(q.action as AccessAction)) {
+    where.push("a.action = ?");
+    params.push(q.action);
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(q.from ?? "")) {
+    where.push("a.created_at >= ?");
+    params.push(`${q.from} 00:00:00`);
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(q.to ?? "")) {
+    where.push("a.created_at <= ?");
+    params.push(`${q.to} 23:59:59`);
+  }
+
+  return all<AccessLogRow>(
     c.env.DB,
-    `SELECT a.id, a.user_name, a.action, a.contact_id, a.detail, a.created_at,
+    `SELECT a.id, a.user_id, a.user_name, a.action, a.contact_id, a.detail, a.ip, a.created_at,
             ct.first_name, ct.last_name
      FROM access_log a
      LEFT JOIN contacts ct ON ct.id = a.contact_id
-     ${contactId ? "WHERE a.contact_id = ?" : ""}
-     ORDER BY a.created_at DESC LIMIT 300`,
-    ...(contactId ? [contactId] : []),
+     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+     ORDER BY a.created_at DESC LIMIT ?`,
+    ...params,
+    limit,
   );
+}
+
+function whoseRecord(row: AccessLogRow): string {
+  const name = `${row.first_name ?? ""} ${row.last_name ?? ""}`.trim();
+  if (name) return name;
+  // A contact that has since been deleted still leaves its id in the log; saying
+  // so is more honest than a blank cell.
+  return row.contact_id ? "(deleted record)" : "";
+}
+
+adminRoutes.get("/access-log", async (c) => {
+  const rows = await queryAccessLog(c, 300);
   const summary = await first<{ downloads: number; exports: number; people: number }>(
     c.env.DB,
     `SELECT
@@ -257,12 +313,62 @@ adminRoutes.get("/access-log", async (c) => {
        COUNT(DISTINCT user_id) AS people
      FROM access_log WHERE created_at > datetime('now', '-30 days')`,
   );
+  // Offered as filter options so the screen only lists staff who actually appear.
+  const staff = await all<{ user_id: string; user_name: string }>(
+    c.env.DB,
+    `SELECT DISTINCT user_id, user_name FROM access_log
+     WHERE user_id IS NOT NULL ORDER BY user_name`,
+  );
+
   return c.json({
-    entries: rows.map((r) => ({ ...r, label: ACCESS_LABEL[r.action as AccessAction] })),
+    entries: rows.map((r) => ({
+      ...r,
+      label: ACCESS_LABEL[r.action],
+      whose: whoseRecord(r),
+    })),
+    staff,
     last30Days: {
       cvDownloads: summary?.downloads ?? 0,
       bulkExports: summary?.exports ?? 0,
       staffActive: summary?.people ?? 0,
+    },
+  });
+});
+
+/**
+ * The log as a file. An audit trail that cannot leave the application is not
+ * much use to whoever has to answer a question about it — a regulator, a
+ * client, or a freelancer asking who has seen their CV.
+ *
+ * Taking this export is itself recorded, so the audit covers its own reading.
+ */
+adminRoutes.get("/access-log/export/csv", async (c) => {
+  const rows = await queryAccessLog(c, 10_000);
+  const csv = toCsv(
+    ["When (UTC)", "Who", "What", "Whose record", "Detail", "IP"],
+    rows.map((r) => [
+      r.created_at,
+      r.user_name || "(removed user)",
+      ACCESS_LABEL[r.action],
+      whoseRecord(r),
+      r.detail ?? "",
+      r.ip ?? "",
+    ]),
+  );
+
+  const user = c.get("user");
+  await recordAccess(c.env.DB, {
+    userId: user.id,
+    userName: user.name,
+    action: "access_log_export",
+    detail: `${rows.length} entries`,
+    ip: clientIp(c.req.raw.headers),
+  });
+
+  return new Response(csv, {
+    headers: {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename="nexian-access-log.csv"`,
     },
   });
 });

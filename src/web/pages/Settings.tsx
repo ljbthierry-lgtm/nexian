@@ -481,24 +481,41 @@ function PrivacyOps() {
  * what a quiet breach actually looks like — nobody edits anything, somebody just
  * downloads every CV on their way out the door.
  */
+interface AccessEntry {
+  id: string;
+  user_id: string | null;
+  user_name: string;
+  action: string;
+  label: string;
+  detail: string | null;
+  whose: string;
+  ip: string | null;
+  created_at: string;
+}
+
+interface AccessLogData {
+  entries: AccessEntry[];
+  staff: { user_id: string; user_name: string }[];
+  last30Days: { cvDownloads: number; bulkExports: number; staffActive: number };
+}
+
+const ACCESS_FILTERS = [
+  { value: "", label: "Everything" },
+  { value: "cv_download", label: "CV downloads" },
+  { value: "pool_export", label: "Pool exports" },
+  { value: "contacts_export", label: "Contact exports" },
+  { value: "access_log_export", label: "Exports of this log" },
+];
+
 function AccessLog() {
-  const [data, setData] = useState<{
-    entries: {
-      id: string;
-      user_name: string;
-      action: string;
-      label: string;
-      detail: string | null;
-      first_name: string | null;
-      last_name: string | null;
-      created_at: string;
-    }[];
-    last30Days: { cvDownloads: number; bulkExports: number; staffActive: number };
-  } | null>(null);
+  const [data, setData] = useState<AccessLogData | null>(null);
+  const [filters, setFilters] = useState({ userId: "", action: "", from: "", to: "" });
+
+  const query = new URLSearchParams(Object.entries(filters).filter(([, v]) => v !== "")).toString();
 
   useEffect(() => {
-    void api.get<typeof data>("/api/admin/access-log").then(setData);
-  }, []);
+    void api.get<AccessLogData>(`/api/admin/access-log${query ? `?${query}` : ""}`).then(setData);
+  }, [query]);
 
   if (!data) return <p className="sub">Loading…</p>;
 
@@ -511,13 +528,59 @@ function AccessLog() {
       </div>
 
       <div className="card">
-        <h3>Recent access</h3>
+        <h3>Who read what</h3>
         <p className="sub">
-          Every CV download and every CSV export, newest first. This log cannot be edited or deleted
-          from inside the application, including by an administrator.
+          Every CV download and every export, newest first. This log cannot be edited or deleted
+          from inside the application, including by an administrator, and an entry outlives both the
+          freelancer whose record it names and the colleague who made it.
         </p>
+
+        <div className="filters">
+          <select
+            value={filters.userId}
+            onChange={(e) => setFilters({ ...filters, userId: e.target.value })}
+            aria-label="Filter by staff member"
+          >
+            <option value="">Anyone</option>
+            {data.staff.map((s) => (
+              <option key={s.user_id} value={s.user_id}>
+                {s.user_name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={filters.action}
+            onChange={(e) => setFilters({ ...filters, action: e.target.value })}
+            aria-label="Filter by what happened"
+          >
+            {ACCESS_FILTERS.map((f) => (
+              <option key={f.value} value={f.value}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+          <input
+            type="date"
+            value={filters.from}
+            onChange={(e) => setFilters({ ...filters, from: e.target.value })}
+            aria-label="From date"
+          />
+          <input
+            type="date"
+            value={filters.to}
+            onChange={(e) => setFilters({ ...filters, to: e.target.value })}
+            aria-label="To date"
+          />
+          <a className="btn plain sm" href={`/api/admin/access-log/export/csv?${query}`}>
+            Export as CSV
+          </a>
+        </div>
+
         {data.entries.length === 0 ? (
-          <p className="sub">Nothing yet — no CV or export has been downloaded.</p>
+          <p className="sub">
+            Nothing matches. No CV or export has been downloaded{query ? " with these filters" : ""}
+            .
+          </p>
         ) : (
           <div className="tablewrap">
             <table>
@@ -532,16 +595,12 @@ function AccessLog() {
               <tbody>
                 {data.entries.map((row) => (
                   <tr key={row.id}>
-                    <td>{row.user_name || "—"}</td>
+                    <td>{row.user_name || "(removed user)"}</td>
                     <td>
                       {row.label}
                       {row.detail && <div className="sub">{row.detail}</div>}
                     </td>
-                    <td className="sub">
-                      {row.first_name || row.last_name
-                        ? `${row.first_name ?? ""} ${row.last_name ?? ""}`.trim()
-                        : "—"}
-                    </td>
+                    <td className="sub">{row.whose || "—"}</td>
                     <td className="sub">{formatDate(row.created_at)}</td>
                   </tr>
                 ))}

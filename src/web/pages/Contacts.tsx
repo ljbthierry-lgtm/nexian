@@ -481,6 +481,8 @@ function ContactDetail({
         </div>
       )}
 
+      <WhoAccessed contactId={id} />
+
       <h3 style={{ marginTop: 18 }}>Activity</h3>
       <div className="field" style={{ display: "flex", gap: 8 }}>
         <input
@@ -511,6 +513,44 @@ function ContactDetail({
         ))}
       </ul>
     </Modal>
+  );
+}
+
+/**
+ * Who has seen this particular freelancer's file.
+ *
+ * The endpoint behind it is admin-only, so rather than thread the current user
+ * down through the modal, the panel simply renders nothing when the request is
+ * refused. A recruiter sees no empty section, and no failure either.
+ */
+function WhoAccessed({ contactId }: { contactId: string }) {
+  const [entries, setEntries] = useState<
+    { id: string; user_name: string; label: string; detail: string | null; created_at: string }[]
+  >([]);
+  const [allowed, setAllowed] = useState(true);
+
+  useEffect(() => {
+    api
+      .get<{ entries: typeof entries }>(`/api/admin/access-log?contactId=${contactId}`)
+      .then((res) => setEntries(res.entries))
+      .catch(() => setAllowed(false));
+  }, [contactId]);
+
+  if (!allowed || entries.length === 0) return null;
+
+  return (
+    <>
+      <h3 style={{ marginTop: 18 }}>Who accessed this record</h3>
+      <ul className="timeline">
+        {entries.map((entry) => (
+          <li key={entry.id}>
+            <strong>{entry.user_name || "(removed user)"}</strong> — {entry.label.toLowerCase()}
+            {entry.detail ? ` (${entry.detail})` : ""}
+            <time>{formatDate(entry.created_at)}</time>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 

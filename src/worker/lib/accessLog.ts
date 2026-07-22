@@ -11,7 +11,25 @@
 import { run, uid } from "./db";
 import { log } from "./log";
 
-export type AccessAction = "cv_download" | "pool_export" | "contacts_export";
+/**
+ * Every kind of read the log can record. This array is the single source of
+ * truth: the database CHECK constraint in migration 0006 lists the same values,
+ * and `test/accessLog.test.ts` fails if the two ever drift.
+ *
+ * `contact_view` and `pool_view` exist in the schema but are not written yet —
+ * recording every time a recruiter opens a profile is systematic monitoring of
+ * staff, which is a decision for the business rather than a default.
+ */
+export const ACCESS_ACTIONS = [
+  "cv_download",
+  "pool_export",
+  "contacts_export",
+  "access_log_export",
+  "contact_view",
+  "pool_view",
+] as const;
+
+export type AccessAction = (typeof ACCESS_ACTIONS)[number];
 
 export interface AccessEntry {
   userId: string | null;
@@ -54,4 +72,7 @@ export const ACCESS_LABEL: Record<AccessAction, string> = {
   cv_download: "Downloaded a CV",
   pool_export: "Exported the talent pool",
   contacts_export: "Exported the contact list",
+  access_log_export: "Exported this access log",
+  contact_view: "Opened a freelancer's record",
+  pool_view: "Browsed the talent pool",
 };
