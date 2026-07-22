@@ -11,6 +11,7 @@ import type { AppContext, ConsentPurpose } from "../../env";
 import { logActivity } from "../../lib/activity";
 import { availabilityPhrase } from "../../lib/availability";
 import { recordConsent } from "../../lib/consent";
+import { isCrossSiteRequest } from "../../lib/csrf";
 import { first, run } from "../../lib/db";
 import { actionPage, esc } from "../../lib/html";
 import { suppressContact } from "../../lib/suppress";
@@ -128,6 +129,29 @@ const POST_PURPOSES = ["portal_link", "confirm_availability", "unsubscribe"] as 
 type PostPurpose = (typeof POST_PURPOSES)[number];
 
 actionRoutes.post("/:token", async (c) => {
+  // Refuse a submission driven by another site before the token is even looked
+  // up, so a hostile page can neither spend a link nor plant a session. This
+  // must stay ahead of consumeActionToken: rejecting after the burn would let
+  // an attacker invalidate somebody's link without ever using it.
+  if (
+    isCrossSiteRequest({
+      secFetchSite: c.req.header("sec-fetch-site"),
+      origin: c.req.header("origin"),
+      requestUrl: c.req.url,
+    })
+  ) {
+    return c.html(
+      actionPage({
+        title: "Open this link directly",
+        heading: "Please open the link from your email",
+        body: `<p>This action was started by another website, so we stopped it. Open the button in our email directly and it will work normally.</p>`,
+        action: { label: "Go to the registration page", href: "/join" },
+        tone: "warn",
+      }),
+      403,
+    );
+  }
+
   const raw = c.req.param("token");
   const peeked = await peekActionToken(c.env.DB, raw);
   if (!peeked) return c.html(expiredPage("This link has already been used or has expired."), 410);

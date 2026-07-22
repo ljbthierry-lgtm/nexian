@@ -168,7 +168,10 @@ export function mapImportRows(table: string[][]): ImportParseResult {
 export function csvCell(value: unknown): string {
   const raw = value === null || value === undefined ? "" : String(value);
   const s = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
-  return /[",;\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  // A tab is quoted along with the usual suspects: the file is comma-delimited,
+  // but Excel's import dialog can be pointed at tabs, and an unquoted tab would
+  // then split one freelancer's row into two.
+  return /[",;\n\r\t]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 export function toCsv(headers: string[], rows: unknown[][]): string {
