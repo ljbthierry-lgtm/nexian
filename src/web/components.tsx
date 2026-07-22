@@ -110,12 +110,24 @@ export function StagePill({ stage }: { stage: Stage }) {
 export function ConsentPill({
   consents,
   suppressed,
+  verified,
 }: {
   consents?: Consents;
   suppressed?: boolean;
+  /** Undefined for contacts, which have no profile to verify. */
+  verified?: boolean;
 }) {
   if (suppressed) return <span className="pill bad">Do not contact</span>;
   if (!consents?.data_processing) return <span className="pill neutral">Opted out (default)</span>;
+  // Consent without a proven address is not something we act on: anyone can type
+  // an address into the public form, so campaigns wait for the link to be opened.
+  if (verified === false) {
+    return (
+      <span className="pill warn" title="Waiting for this person to open the link we emailed them">
+        Unverified — not mailed
+      </span>
+    );
+  }
   const extras = [consents.mission_alerts ? "alerts" : null, consents.news ? "news" : null].filter(
     Boolean,
   );

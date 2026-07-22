@@ -145,6 +145,28 @@ campaignRoutes.get("/:id", async (c) => {
  * Send. The audience is rebuilt from the consent ledger at this moment — someone
  * who withdrew consent between drafting and sending is simply not in it.
  */
+/**
+ * A Worker invocation may make a limited number of outbound requests, and each
+ * recipient costs one. Sending stops at this many per press and reports how many
+ * are left, rather than dying half-way through a large list.
+ */
+const MAX_SENDS_PER_REQUEST = 40;
+
+/**
+ * Send.
+ *
+ * Two things make this safe to press twice, which matters because a large
+ * campaign needs pressing twice on purpose and a nervous user will press it
+ * twice by accident:
+ *
+ *   - the draft→sending transition is a compare-and-swap, so two people pressing
+ *     Send at the same moment cannot both start;
+ *   - anyone already recorded as sent is skipped, so a run that stopped — at the
+ *     batch ceiling, or because the isolate died — resumes instead of re-mailing.
+ *
+ * The audience itself is rebuilt from the consent ledger at this moment, so
+ * somebody who withdrew consent between drafting and sending is simply absent.
+ */
 campaignRoutes.post("/:id/send", async (c) => {
   const id = c.req.param("id");
   const campaign = await first<{
@@ -159,22 +181,44 @@ campaignRoutes.post("/:id/send", async (c) => {
   if (!campaign) throw notFound("No such campaign");
   if (campaign.status === "sent") throw conflict("This campaign has already been sent.");
 
+  // Claim the campaign. Only one caller can move it out of its current state.
+  const claim = await run(
+    c.env.DB,
+    `UPDATE campaigns SET status = 'sending' WHERE id = ? AND status = ?`,
+    id,
+    campaign.status,
+  );
+  if (!claim.meta.changes) throw conflict("Somebody else is sending this campaign right now.");
+
   const segment = JSON.parse(campaign.segment || "{}") as Segment;
   const audience = await loadAudience(c.env.DB, segment, campaign.purpose);
   if (!audience.length) {
+    await run(c.env.DB, `UPDATE campaigns SET status = 'draft' WHERE id = ?`, id);
     throw badRequest(
       "Nobody in this segment has agreed to receive these emails, so there is nothing to send.",
       "empty_audience",
     );
   }
 
-  await run(c.env.DB, `UPDATE campaigns SET status = 'sending' WHERE id = ?`, id);
+  // Whoever already received it is not sent to again, whatever happened last time.
+  const alreadySent = new Set(
+    (
+      await all<{ contact_id: string }>(
+        c.env.DB,
+        `SELECT contact_id FROM campaign_recipients WHERE campaign_id = ? AND status = 'sent'`,
+        id,
+      )
+    ).map((r) => r.contact_id),
+  );
+  const pending = audience.filter((person) => !alreadySent.has(person.id));
+  const batch = pending.slice(0, MAX_SENDS_PER_REQUEST);
+
   const baseUrl = await resolveBaseUrl(c.env);
   const ctx = { companyName: c.env.COMPANY_NAME, baseUrl };
   let sent = 0;
   let failed = 0;
 
-  for (const person of audience) {
+  for (const person of batch) {
     const unsubToken = await createActionToken(c.env.DB, {
       purpose: "unsubscribe",
       contactId: person.id,
@@ -199,7 +243,9 @@ campaignRoutes.post("/:id/send", async (c) => {
       contactId: person.id,
       campaignId: campaign.id,
     });
-    ok ? sent++ : failed++;
+    if (ok) sent++;
+    else failed++;
+
     await run(
       c.env.DB,
       `INSERT INTO campaign_recipients (campaign_id, contact_id, status, error)
@@ -214,19 +260,23 @@ campaignRoutes.post("/:id/send", async (c) => {
       contactId: person.id,
       kind: ok ? "email_sent" : "email_failed",
       channel: "email",
-      summary: `${ok ? "Received" : "Failed to receive"} campaign “${campaign.name}”`,
+      summary: `${ok ? "Received" : "Failed to receive"} campaign "${campaign.name}"`,
       actorUserId: c.get("user").id,
     });
   }
 
+  const remaining = pending.length - batch.length;
   await run(
     c.env.DB,
-    `UPDATE campaigns SET status = 'sent', sent_at = datetime('now'), sent_count = ?, failed_count = ?
+    `UPDATE campaigns
+       SET status = ?, sent_at = datetime('now'),
+           sent_count = sent_count + ?, failed_count = ?
      WHERE id = ?`,
+    remaining > 0 ? "sending" : "sent",
     sent,
     failed,
     id,
   );
-  log.info("campaign.sent", { campaign: id, sent, failed });
-  return c.json({ ok: true, sent, failed });
+  log.info("campaign.sent", { campaign: id, sent, failed, remaining });
+  return c.json({ ok: true, sent, failed, remaining });
 });

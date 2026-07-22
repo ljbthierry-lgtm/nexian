@@ -16,7 +16,6 @@
     "migrate:local": "wrangler d1 migrations apply nexian_talent --local",
     "migrate:prod": "wrangler d1 migrations apply nexian_talent --remote",
     "deploy": "npm run build && wrangler deploy",
-    "setup:cloudflare": "node scripts/setup-cloudflare.mjs",
     "ci": "npm run format:check && npm run check && npm run test && npm run build"
   },
   "dependencies": {
@@ -25,6 +24,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260714.1",
+    "@types/node": "^26.1.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",

@@ -18,6 +18,13 @@ This is the part to understand before changing anything.
 - **Consent is granted by the freelancer, on the platform.** The registration
   form has three separate boxes — store my profile (required), mission alerts
   (optional), company news (optional) — none of them pre-ticked.
+- **And the address has to be proven.** Registration is a public form, so anyone
+  can submit it with somebody else's address; a consent row on its own only
+  shows that *somebody typed* an address. A profile therefore starts unverified
+  and is stamped when the personal link we emailed is opened — something only
+  the mailbox owner can do. Campaign audiences require the stamp. Unverified
+  people still appear in the pool for recruiters, clearly marked, because they
+  are real leads; they simply are not mailed.
 - **The ledger is append-only.** `consents` is never updated or deleted; the
   `consent_current` view resolves the latest decision per purpose. That way we
   can always show what someone agreed to, when, and against which policy
@@ -72,10 +79,28 @@ Two identities, two cookies: `nx_session` for staff, `nx_portal` for a
 freelancer who followed a magic link. A portal cookie can never satisfy a back
 office route.
 
+**No public endpoint hands out a session.** Registration used to sign the caller
+in so the CV could be uploaded in the same sitting. That was wrong: when the
+address belonged to a contact that had no profile yet — every prospect we had
+imported — it gave whoever knew that address a session over that person's
+record, internal recruiter notes included. The CV now travels inside the
+registration request instead, and reaching a profile always costs a click on a
+link sent to the address itself.
+
+**Public endpoints answer identically whatever they find.** Registration and
+"email me my link" both return `{ok:true}` for a known and an unknown address,
+because a different answer turns either form into a way to test whether a named
+person is in the pool.
+
 Email buttons land on `GET /a/:token`, which **renders** a page; the mutation
 happens on `POST`. Corporate mail scanners fetch every URL in an incoming
 message, so a magic link that acted on GET would be spent before the person
-clicked it.
+clicked it. The purpose is checked *before* the token is spent, or a link that
+reached the wrong route would be burned and then rejected.
+
+**Public and sign-in endpoints are throttled** (`lib/rateLimit.ts`). The limit
+that matters most is per-target-address on "email me my link": without it,
+anyone could point that form at a stranger and have us mail them repeatedly.
 
 ## Local development
 

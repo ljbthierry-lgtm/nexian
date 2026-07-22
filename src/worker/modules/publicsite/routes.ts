@@ -6,20 +6,21 @@
  *   - never confirm whether an address is already in the database (enumeration);
  *   - never hand out a session for an address that already owns a profile.
  */
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { z } from "zod";
 import type { AppContext } from "../../env";
 import { logActivity } from "../../lib/activity";
 import { PURPOSE_LABEL, recordConsents } from "../../lib/consent";
 import { resolveBaseUrl } from "../../lib/baseUrl";
 import { all, first, run, uid } from "../../lib/db";
-import { badRequest } from "../../lib/errors";
+import { ALLOWED_CV_TYPES, MAX_CV_BYTES, isAcceptableCv, putCv } from "../../lib/cvStore";
+import { serialiseLabels } from "../../lib/labels";
+import { badRequest, tooManyRequests } from "../../lib/errors";
 import { log } from "../../lib/log";
-import { unsuppressEmail } from "../../lib/suppression";
+import { RATE_LIMITS, clientIp, hitRateLimit } from "../../lib/rateLimit";
 import { sendEmail } from "../notifications/resend";
 import { portalLinkEmail, welcomeEmail } from "../notifications/templates";
 import { createActionToken } from "../notifications/tokens";
-import { startPortalSession } from "../portal/session";
 
 export const publicRoutes = new Hono<AppContext>();
 
@@ -63,8 +64,58 @@ publicRoutes.get("/taxonomy", async (c) => {
   });
 });
 
+/**
+ * Read a registration from either a JSON body or a multipart form.
+ *
+ * The CV travels with the registration itself. It used to be uploaded in a
+ * second call authenticated by a session this endpoint handed out — which was
+ * the bug described below.
+ */
+async function readRegistration(c: Context<AppContext>) {
+  const contentType = c.req.header("content-type") ?? "";
+  if (contentType.includes("multipart/form-data")) {
+    const form = await c.req.formData();
+    const raw = form.get("profile");
+    if (typeof raw !== "string") throw badRequest("Missing registration details.");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw badRequest("Could not read the registration details.");
+    }
+    const file = form.get("cv");
+    return {
+      input: registerSchema.parse(parsed),
+      cv: file instanceof File && file.size > 0 ? file : null,
+    };
+  }
+  return { input: registerSchema.parse(await c.req.json()), cv: null };
+}
+
+/**
+ * Public registration.
+ *
+ * Two rules govern this handler, and both exist because anyone on the internet
+ * can call it with anyone else's address:
+ *
+ *   1. It never issues a session. An earlier version signed the caller in when
+ *      the address belonged to a contact with no profile yet — that is, every
+ *      prospect staff had imported — which handed whoever knew that address a
+ *      portal session over that person's record, internal recruiter notes
+ *      included. Reaching a profile now always costs a click on a link sent to
+ *      the address itself.
+ *   2. Every path returns the same answer. Reporting whether the address was
+ *      already known turns this form into a way to test whether a named person
+ *      is in the pool.
+ */
 publicRoutes.post("/register", async (c) => {
-  const input = registerSchema.parse(await c.req.json());
+  const ip = clientIp(c.req.raw.headers);
+  const throttle = await hitRateLimit(c.env.DB, RATE_LIMITS.register, `ip:${ip}`);
+  if (!throttle.allowed) {
+    throw tooManyRequests("Too many registrations from this connection. Please try again later.");
+  }
+
+  const { input, cv } = await readRegistration(c);
 
   // The processing consent is the legal basis for holding the profile at all.
   if (!input.consent_data_processing) {
@@ -76,11 +127,19 @@ publicRoutes.post("/register", async (c) => {
   if (input.availability === "from_date" && !input.available_from) {
     throw badRequest("Please give the date you become available.", "date_required");
   }
+  if (cv && !isAcceptableCv(cv.name, cv.type)) {
+    throw badRequest("Please upload a PDF or Word document as your CV.");
+  }
+  if (cv && cv.size > MAX_CV_BYTES) {
+    throw badRequest(
+      `That CV is ${(cv.size / 1048576).toFixed(1)} MB. The limit is ${MAX_CV_BYTES / 1048576} MB.`,
+    );
+  }
 
   const email = input.email.trim().toLowerCase();
-  const existing = await first<{ id: string; suppressed: number; stage: string }>(
+  const existing = await first<{ id: string; suppressed: number }>(
     c.env.DB,
-    `SELECT id, suppressed, stage FROM contacts WHERE email = ?`,
+    `SELECT id, suppressed FROM contacts WHERE email = ?`,
     email,
   );
   const hadProfile = existing
@@ -93,16 +152,27 @@ publicRoutes.post("/register", async (c) => {
       )
     : false;
 
-  const contactId = existing?.id ?? uid();
   const baseUrl = await resolveBaseUrl(c.env);
   const ctx = { companyName: c.env.COMPANY_NAME, baseUrl };
+  /** The one answer every branch gives, whoever is asking. */
+  const answered = () => c.json({ ok: true });
 
-  // Someone re-submitting the form for an address that already has a profile is
-  // either the owner returning, or someone else guessing. Either way: change
-  // nothing, and mail the real owner a link. That keeps takeover impossible
-  // while still doing the useful thing for the genuine case.
-  if (hadProfile) {
-    const raw = await createActionToken(c.env.DB, { purpose: "portal_link", contactId });
+  // Someone who told us never to contact them again stays that way. Acting on
+  // this form would let anyone undo a stranger's opt-out, so the request is
+  // accepted, recorded and ignored; coming back is a conversation with a human.
+  if (existing && existing.suppressed === 1) {
+    log.info("public.register_suppressed", { contact: existing.id });
+    return answered();
+  }
+
+  // The address already owns a profile: change nothing, mail its owner a link.
+  // The genuine returning user gets what they wanted; anyone else learns
+  // nothing and alters nothing.
+  if (existing && hadProfile) {
+    const raw = await createActionToken(c.env.DB, {
+      purpose: "portal_link",
+      contactId: existing.id,
+    });
     const mail = portalLinkEmail(ctx, {
       firstName: input.first_name,
       portalUrl: `${baseUrl}/a/${raw}`,
@@ -112,11 +182,12 @@ publicRoutes.post("/register", async (c) => {
       subject: mail.subject,
       html: mail.html,
       template: "portal_link",
-      contactId,
+      contactId: existing.id,
     });
-    return c.json({ ok: true, existing: true });
+    return answered();
   }
 
+  const contactId = existing?.id ?? uid();
   if (existing) {
     // A prospect we had already added is now registering themselves.
     await run(
@@ -125,7 +196,6 @@ publicRoutes.post("/register", async (c) => {
          SET first_name = ?, last_name = ?, phone = COALESCE(?, phone),
              linkedin_url = COALESCE(?, linkedin_url),
              stage = CASE WHEN stage IN ('prospect', 'contacted') THEN 'registered' ELSE stage END,
-             suppressed = 0, suppressed_at = NULL, suppressed_reason = NULL,
              updated_at = datetime('now')
        WHERE id = ?`,
       input.first_name,
@@ -134,16 +204,6 @@ publicRoutes.post("/register", async (c) => {
       input.linkedin_url ?? null,
       contactId,
     );
-    if (existing.suppressed === 1) {
-      // Registering voluntarily overrides an earlier "do not contact" — including
-      // the permanent hashed list, or they would be blocked from their own pool.
-      await unsuppressEmail(c.env.DB, email);
-      await logActivity(c.env.DB, {
-        contactId,
-        kind: "note",
-        summary: "Suppression lifted: the freelancer registered themselves",
-      });
-    }
   } else {
     await run(
       c.env.DB,
@@ -167,9 +227,9 @@ publicRoutes.post("/register", async (c) => {
     contactId,
     input.headline ?? "",
     input.years_experience ?? null,
-    JSON.stringify(input.skills),
-    JSON.stringify(input.industries),
-    JSON.stringify(input.languages),
+    serialiseLabels(input.skills),
+    serialiseLabels(input.industries),
+    serialiseLabels(input.languages),
     input.daily_rate ?? null,
     input.availability,
     input.available_from ?? null,
@@ -177,6 +237,25 @@ publicRoutes.post("/register", async (c) => {
     input.remote_ok ? 1 : 0,
     input.freelancer_note ?? null,
   );
+
+  if (cv) {
+    const bytes = new Uint8Array(await cv.arrayBuffer());
+    await putCv(c.env.DB, contactId, bytes);
+    await run(
+      c.env.DB,
+      `UPDATE profiles SET cv_filename = ?, cv_mime = ?, cv_size = ?, cv_uploaded_at = datetime('now')
+       WHERE contact_id = ?`,
+      cv.name.slice(0, 200),
+      ALLOWED_CV_TYPES[cv.type] ? cv.type : "application/octet-stream",
+      bytes.length,
+      contactId,
+    );
+    await logActivity(c.env.DB, {
+      contactId,
+      kind: "cv_uploaded",
+      summary: "Uploaded a CV with their registration",
+    });
+  }
 
   await recordConsents(
     c.env,
@@ -218,16 +297,30 @@ publicRoutes.post("/register", async (c) => {
     contactId,
   });
 
-  // First-time registration: sign them straight in so the CV upload and any
-  // corrections happen in the same sitting.
-  await startPortalSession(c, contactId);
-  log.info("public.registered", { contact: contactId });
-  return c.json({ ok: true, existing: false });
+  log.info("public.registered", { contact: contactId, withCv: Boolean(cv) });
+  return answered();
 });
 
 /** "Email me my update link". Always answers the same, whoever asks. */
 publicRoutes.post("/request-link", async (c) => {
   const { email } = z.object({ email: z.string().email() }).parse(await c.req.json());
+
+  // Two limits, and the per-email one is the important half: anyone can type a
+  // stranger's address here, so without it this form is a way to have us mail a
+  // third party on demand, as often as the attacker likes.
+  const target = email.trim().toLowerCase();
+  const ip = clientIp(c.req.raw.headers);
+  const checks = [
+    await hitRateLimit(c.env.DB, RATE_LIMITS.linkPerEmail, `email:${target}`),
+    await hitRateLimit(c.env.DB, RATE_LIMITS.linkPerIp, `ip:${ip}`),
+  ];
+  if (checks.some((check) => !check.allowed)) {
+    // Deliberately the same shape of answer as the success path: telling the
+    // caller they hit a per-address limit would confirm the address exists.
+    log.info("public.link_rate_limited", { ip });
+    return c.json({ ok: true });
+  }
+
   const contact = await first<{ id: string; first_name: string }>(
     c.env.DB,
     `SELECT ct.id, ct.first_name FROM contacts ct

@@ -16,3 +16,4 @@ export const unauthorized = (msg = "Authentication required") =>
 export const forbidden = (msg = "Not allowed for your role") => new AppError(403, "forbidden", msg);
 export const notFound = (msg = "Not found") => new AppError(404, "not_found", msg);
 export const conflict = (msg: string) => new AppError(409, "conflict", msg);
+export const tooManyRequests = (msg: string) => new AppError(429, "rate_limited", msg);

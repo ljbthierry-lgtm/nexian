@@ -10,9 +10,11 @@
  */
 import { type Env, intVar } from "./env";
 import { logActivity } from "./lib/activity";
+import { availabilitySentence } from "./lib/availability";
 import { resolveBaseUrl } from "./lib/baseUrl";
 import { all, run } from "./lib/db";
 import { log } from "./lib/log";
+import { pruneRateLimits } from "./lib/rateLimit";
 import { runRetentionSweep } from "./modules/admin/retention";
 import { sendEmail } from "./modules/notifications/resend";
 import { availabilityReminderEmail } from "./modules/notifications/templates";
@@ -123,7 +125,7 @@ export async function sendAvailabilityReminders(env: Env, now = new Date()): Pro
     });
     const mail = availabilityReminderEmail(ctx, {
       firstName: row.first_name,
-      availabilityLine: describeAvailability(row),
+      availabilityLine: availabilitySentence(row),
       confirmUrl: `${baseUrl}/a/${confirmToken}`,
       portalUrl: `${baseUrl}/a/${portalToken}`,
       unsubscribeUrl: `${baseUrl}/a/${unsubToken}`,
@@ -156,24 +158,13 @@ export async function sendAvailabilityReminders(env: Env, now = new Date()): Pro
   return sent;
 }
 
-function describeAvailability(row: {
-  availability: string;
-  available_from: string | null;
-}): string {
-  if (row.availability === "now") return "you are available now";
-  if (row.availability === "not_available") return "you are not available at the moment";
-  if (row.availability === "from_date" && row.available_from) {
-    return `you are available from ${row.available_from}`;
-  }
-  return "your availability is not set";
-}
-
 export async function runScheduledJobs(env: Env): Promise<void> {
   const started = Date.now();
   try {
     const followUps = await sendDueFollowUps(env);
     const reminders = await sendAvailabilityReminders(env);
     const anonymised = await runRetentionSweep(env);
+    await pruneRateLimits(env.DB);
     log.info("cron.done", { followUps, reminders, anonymised, ms: Date.now() - started });
   } catch (e) {
     log.error("cron.failed", { error: e instanceof Error ? e.message : String(e) });

@@ -14,14 +14,16 @@ import { consentHistory, currentConsents, recordConsent } from "../../lib/consen
 import {
   ALLOWED_CV_TYPES,
   MAX_CV_BYTES,
+  cvResponse,
   deleteCv,
   getCv,
   isAcceptableCv,
   putCv,
 } from "../../lib/cvStore";
 import { all, first, run } from "../../lib/db";
+import { parseLabels, serialiseLabels } from "../../lib/labels";
 import { badRequest, notFound } from "../../lib/errors";
-import { suppressEmail } from "../../lib/suppression";
+import { suppressContact } from "../../lib/suppress";
 import { requirePortal } from "../../middleware/auth";
 import { revokeTokens } from "../notifications/tokens";
 import { endPortalSession, revokePortalSessions } from "./session";
@@ -50,15 +52,6 @@ interface ProfileRow {
   last_confirmed_at: string | null;
 }
 
-function parseJsonArray(raw: string): string[] {
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
 async function loadProfile(db: D1Database, contactId: string) {
   const row = await first<ProfileRow>(
     db,
@@ -71,9 +64,9 @@ async function loadProfile(db: D1Database, contactId: string) {
   if (!row) throw notFound("We could not find your profile");
   return {
     ...row,
-    skills: parseJsonArray(row.skills),
-    industries: parseJsonArray(row.industries),
-    languages: parseJsonArray(row.languages),
+    skills: parseLabels(row.skills),
+    industries: parseLabels(row.industries),
+    languages: parseLabels(row.languages),
     remote_ok: row.remote_ok === 1,
   };
 }
@@ -150,9 +143,9 @@ portalRoutes.patch("/profile", async (c) => {
   };
   if (input.headline !== undefined) set("headline", input.headline);
   if (input.years_experience !== undefined) set("years_experience", input.years_experience);
-  if (input.skills !== undefined) set("skills", JSON.stringify(input.skills));
-  if (input.industries !== undefined) set("industries", JSON.stringify(input.industries));
-  if (input.languages !== undefined) set("languages", JSON.stringify(input.languages));
+  if (input.skills !== undefined) set("skills", serialiseLabels(input.skills));
+  if (input.industries !== undefined) set("industries", serialiseLabels(input.industries));
+  if (input.languages !== undefined) set("languages", serialiseLabels(input.languages));
   if (input.daily_rate !== undefined) set("daily_rate", input.daily_rate);
   if (input.availability !== undefined) set("availability", input.availability);
   if (input.available_from !== undefined) set("available_from", input.available_from);
@@ -265,12 +258,7 @@ portalRoutes.get("/cv", async (c) => {
   );
   const bytes = await getCv(c.env.DB, contact.id);
   if (!bytes || !meta?.cv_filename) throw notFound("No CV on file");
-  return new Response(bytes, {
-    headers: {
-      "Content-Type": meta.cv_mime ?? "application/octet-stream",
-      "Content-Disposition": `attachment; filename="${meta.cv_filename.replace(/"/g, "")}"`,
-    },
-  });
+  return cvResponse(bytes, meta.cv_filename, meta.cv_mime);
 });
 
 portalRoutes.delete("/cv", async (c) => {
@@ -311,12 +299,24 @@ portalRoutes.post("/consent", async (c) => {
 portalRoutes.get("/export", async (c) => {
   const contact = c.get("contact");
   const [full, profile, consents, activity] = await Promise.all([
-    first<Record<string, unknown>>(c.env.DB, `SELECT * FROM contacts WHERE id = ?`, contact.id),
+    first<Record<string, unknown>>(
+      c.env.DB,
+      // Explicit columns, never SELECT *: internal_notes is staff commentary and
+      // a future column must not publish itself into this download by default.
+      `SELECT id, email, first_name, last_name, phone, linkedin_url, source, stage,
+              outreach_count, first_outreach_at, last_outreach_at, created_at
+       FROM contacts WHERE id = ?`,
+      contact.id,
+    ),
     loadProfile(c.env.DB, contact.id),
     consentHistory(c.env.DB, contact.id),
     all<Record<string, unknown>>(
       c.env.DB,
-      `SELECT kind, summary, detail, created_at FROM activity WHERE contact_id = ? ORDER BY created_at`,
+      // Staff-authored notes are excluded: the "note" kind is where a recruiter's
+      // private commentary is stored, and a self-service download is not the
+      // place to hand it over. A formal access request still covers it.
+      `SELECT kind, summary, detail, created_at FROM activity
+       WHERE contact_id = ? AND kind != 'note' ORDER BY created_at`,
       contact.id,
     ),
   ]);
@@ -349,9 +349,14 @@ portalRoutes.get("/export", async (c) => {
  */
 portalRoutes.post("/delete", async (c) => {
   const contact = c.get("contact");
-  // Record the opt-out before the address is overwritten, or a later import of
-  // the same list would quietly bring this person back.
-  await suppressEmail(c.env.DB, contact.email, "Profile deleted by the freelancer");
+  // Recorded before the address is overwritten below, or a later import of the
+  // same list would quietly bring this person back.
+  await suppressContact(c.env, {
+    contactId: contact.id,
+    email: contact.email,
+    reason: "Profile deleted by the freelancer",
+    source: "profile_page",
+  });
   await deleteCv(c.env.DB, contact.id);
   await run(c.env.DB, `DELETE FROM profiles WHERE contact_id = ?`, contact.id);
   await run(

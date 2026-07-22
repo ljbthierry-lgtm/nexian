@@ -5,10 +5,12 @@ import type { AppContext, Stage } from "../../env";
 import { logActivity } from "../../lib/activity";
 import { consentHistory, consentsFor, currentConsents } from "../../lib/consent";
 import { mapImportRows, parseCsv, toCsv } from "../../lib/csv";
-import { getCv } from "../../lib/cvStore";
+import { cvResponse, getCv } from "../../lib/cvStore";
 import { all, first, run, uid } from "../../lib/db";
+import { parseLabels } from "../../lib/labels";
 import { badRequest, notFound } from "../../lib/errors";
-import { filterSuppressed, isSuppressed, suppressEmail } from "../../lib/suppression";
+import { suppressContact } from "../../lib/suppress";
+import { filterSuppressed, isSuppressed } from "../../lib/suppression";
 import { requireAuth } from "../../middleware/auth";
 
 export const contactRoutes = new Hono<AppContext>();
@@ -206,9 +208,9 @@ contactRoutes.get("/:id", async (c) => {
     profile: profile
       ? {
           ...profile,
-          skills: safeArray(profile.skills),
-          industries: safeArray(profile.industries),
-          languages: safeArray(profile.languages),
+          skills: parseLabels(profile.skills),
+          industries: parseLabels(profile.industries),
+          languages: parseLabels(profile.languages),
         }
       : null,
     consents,
@@ -281,23 +283,31 @@ contactRoutes.post("/:id/suppress", async (c) => {
     id,
   );
   if (!target) throw notFound("No such contact");
-  if (suppressed) await suppressEmail(c.env.DB, target.email, reason);
 
-  await run(
-    c.env.DB,
-    suppressed
-      ? `UPDATE contacts SET suppressed = 1, suppressed_at = datetime('now'), suppressed_reason = ?,
-           stage = 'closed', updated_at = datetime('now') WHERE id = ?`
-      : `UPDATE contacts SET suppressed = 0, suppressed_at = NULL, suppressed_reason = NULL,
-           updated_at = datetime('now') WHERE id = ?`,
-    ...(suppressed ? [reason, id] : [id]),
-  );
-  await logActivity(c.env.DB, {
-    contactId: id,
-    kind: suppressed ? "suppressed" : "note",
-    summary: suppressed ? `Marked do-not-contact: ${reason}` : "Suppression lifted by staff",
-    actorUserId: c.get("user").id,
-  });
+  if (suppressed) {
+    // The same routine the unsubscribe link uses, so a staff-side opt-out is
+    // recorded identically — including the consent withdrawals.
+    await suppressContact(c.env, {
+      contactId: id,
+      email: target.email,
+      reason,
+      source: "admin",
+      actorUserId: c.get("user").id,
+    });
+  } else {
+    await run(
+      c.env.DB,
+      `UPDATE contacts SET suppressed = 0, suppressed_at = NULL, suppressed_reason = NULL,
+         updated_at = datetime('now') WHERE id = ?`,
+      id,
+    );
+    await logActivity(c.env.DB, {
+      contactId: id,
+      kind: "note",
+      summary: "Suppression lifted by staff",
+      actorUserId: c.get("user").id,
+    });
+  }
   return c.json({ ok: true });
 });
 
@@ -323,12 +333,7 @@ contactRoutes.get("/:id/cv", async (c) => {
   );
   const bytes = await getCv(c.env.DB, id);
   if (!bytes || !meta?.cv_filename) throw notFound("No CV on file for this freelancer");
-  return new Response(bytes, {
-    headers: {
-      "Content-Type": meta.cv_mime ?? "application/octet-stream",
-      "Content-Disposition": `attachment; filename="${meta.cv_filename.replace(/"/g, "")}"`,
-    },
-  });
+  return cvResponse(bytes, meta.cv_filename, meta.cv_mime);
 });
 
 /**
@@ -456,13 +461,3 @@ contactRoutes.get("/export/csv", async (c) => {
     },
   });
 });
-
-function safeArray(raw: unknown): string[] {
-  if (typeof raw !== "string") return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
-  } catch {
-    return [];
-  }
-}

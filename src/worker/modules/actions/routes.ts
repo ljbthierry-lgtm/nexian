@@ -9,10 +9,11 @@
 import { Hono } from "hono";
 import type { AppContext, ConsentPurpose } from "../../env";
 import { logActivity } from "../../lib/activity";
-import { MARKETING_PURPOSES, recordConsent } from "../../lib/consent";
+import { availabilityPhrase } from "../../lib/availability";
+import { recordConsent } from "../../lib/consent";
 import { first, run } from "../../lib/db";
 import { actionPage, esc } from "../../lib/html";
-import { suppressEmail } from "../../lib/suppression";
+import { suppressContact } from "../../lib/suppress";
 import { consumeActionToken, peekActionToken } from "../notifications/tokens";
 import { startPortalSession } from "../portal/session";
 
@@ -78,7 +79,7 @@ actionRoutes.get("/:token", async (c) => {
         actionPage({
           title: "Confirm your availability",
           heading: "Is this still correct?",
-          body: `<p>${hello} we have you as <strong>${esc(describeAvailability(profile))}</strong>${
+          body: `<p>${hello} we have you as <strong>${esc(availabilityPhrase(profile))}</strong>${
             profile?.daily_rate ? ` at <strong>€ ${profile.daily_rate}/day</strong>` : ""
           }.</p>`,
           action: { label: "Yes — still correct", method: "post" },
@@ -113,17 +114,44 @@ actionRoutes.get("/:token", async (c) => {
   }
 });
 
+/**
+ * The purposes this handler knows how to act on.
+ *
+ * `set_password` is deliberately absent: it is completed by the SPA, and the GET
+ * above redirects it there. Listing it here would be harmless; *consuming* a
+ * token before checking that it is handled is not — an earlier version burned
+ * every token up front, so a staff invitation that arrived at this route was
+ * marked used and then rejected as an unknown link type, leaving the new
+ * colleague with a dead invitation and no way to tell why.
+ */
+const POST_PURPOSES = ["portal_link", "confirm_availability", "unsubscribe"] as const;
+type PostPurpose = (typeof POST_PURPOSES)[number];
+
 actionRoutes.post("/:token", async (c) => {
   const raw = c.req.param("token");
   const peeked = await peekActionToken(c.env.DB, raw);
   if (!peeked) return c.html(expiredPage("This link has already been used or has expired."), 410);
 
-  const row = await consumeActionToken(c.env.DB, raw, peeked.purpose);
+  // Decide first, spend second — and pass the purpose as a literal, so the check
+  // inside consumeActionToken is a real comparison rather than a tautology.
+  const purpose = POST_PURPOSES.find((p): p is PostPurpose => p === peeked.purpose);
+  if (!purpose) return c.html(expiredPage("This link cannot be used here."), 400);
+
+  const row = await consumeActionToken(c.env.DB, raw, purpose);
   if (!row) return c.html(expiredPage("This link has already been used."), 410);
 
-  switch (row.purpose) {
+  switch (purpose) {
     case "portal_link": {
       if (!row.contact_id) return c.html(expiredPage("This link is not linked to a profile."), 410);
+      // Opening a link we emailed proves control of the address, which is what
+      // turns a consent row from "somebody typed this" into evidence. Stamped
+      // once and never cleared.
+      await run(
+        c.env.DB,
+        `UPDATE profiles SET verified_at = datetime('now')
+         WHERE contact_id = ? AND verified_at IS NULL`,
+        row.contact_id,
+      );
       await startPortalSession(c, row.contact_id);
       return c.redirect("/profile", 303);
     }
@@ -160,27 +188,11 @@ actionRoutes.post("/:token", async (c) => {
           `SELECT first_name, email FROM contacts WHERE id = ?`,
           row.contact_id,
         );
-        // Outlives the record, so a future import cannot undo this opt-out.
-        if (target) await suppressEmail(c.env.DB, target.email, "Opted out from an email");
-        await run(
-          c.env.DB,
-          `UPDATE contacts SET suppressed = 1, suppressed_at = datetime('now'),
-             suppressed_reason = 'Opted out from an email', stage = 'closed',
-             updated_at = datetime('now') WHERE id = ?`,
-          row.contact_id,
-        );
-        for (const purpose of MARKETING_PURPOSES) {
-          await recordConsent(c.env, {
-            contactId: row.contact_id,
-            purpose,
-            granted: false,
-            source: "unsubscribe_link",
-          });
-        }
-        await logActivity(c.env.DB, {
+        await suppressContact(c.env, {
           contactId: row.contact_id,
-          kind: "suppressed",
-          summary: "Asked not to be contacted again (email link)",
+          email: target?.email ?? "",
+          reason: "Opted out from an email",
+          source: "unsubscribe_link",
         });
         return c.html(
           actionPage({
@@ -231,16 +243,4 @@ function scopeLabel(scope: Scope): string {
   if (scope === "mission_alerts") return "mission alerts";
   if (scope === "news") return "company news";
   return "emails";
-}
-
-function describeAvailability(
-  profile: { availability: string; available_from: string | null } | null,
-): string {
-  if (!profile) return "available";
-  if (profile.availability === "now") return "available now";
-  if (profile.availability === "not_available") return "not available";
-  if (profile.availability === "from_date" && profile.available_from) {
-    return `available from ${profile.available_from}`;
-  }
-  return "available";
 }

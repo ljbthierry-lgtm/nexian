@@ -1,8 +1,12 @@
 # Security headers for statically served assets (the SPA shell).
+#
 # Cloudflare serves these from the edge, bypassing the Worker, so the headers set
-# in src/worker/index.ts do not apply here.
+# in src/worker/index.ts do not apply here. Keep this list in step with the CSP
+# constant in that file — they protect the same pages by two different routes.
 /*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Referrer-Policy: same-origin
   Permissions-Policy: geolocation=(), microphone=(), camera=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains

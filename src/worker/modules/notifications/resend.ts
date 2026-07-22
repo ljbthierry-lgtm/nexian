@@ -1,6 +1,10 @@
 /**
  * Resend REST client (plain fetch — no SDK dependency).
  *
+ * Recipient addresses go to email_log, not to the Workers log: logs are a wider
+ * and longer-lived audience than the database, and email_log already answers
+ * "did they get it?".
+ *
  * Every send is written to email_log, success or failure. A failed email never
  * throws into the calling flow: a registration must not fail because the mail
  * provider hiccuped.
@@ -30,10 +34,10 @@ export async function sendEmail(env: Env, mail: OutgoingEmail): Promise<boolean>
     // end without any chance of mailing a real person.
     ok = true;
     providerId = "dev-noop";
-    log.info("email.dev_noop", { to: mail.to, template: mail.template, subject: mail.subject });
+    log.info("email.dev_noop", { contact: mail.contactId, template: mail.template });
   } else if (!env.RESEND_API_KEY) {
     error = "RESEND_API_KEY not configured";
-    log.warn("email.skipped_no_key", { to: mail.to, template: mail.template });
+    log.warn("email.skipped_no_key", { contact: mail.contactId, template: mail.template });
   } else {
     try {
       const res = await fetch("https://api.resend.com/emails", {
@@ -83,6 +87,6 @@ export async function sendEmail(env: Env, mail: OutgoingEmail): Promise<boolean>
     log.error("email.log_failed", { error: e instanceof Error ? e.message : String(e) });
   }
 
-  if (!ok) log.warn("email.failed", { to: mail.to, template: mail.template, error });
+  if (!ok) log.warn("email.failed", { contact: mail.contactId, template: mail.template, error });
   return ok;
 }

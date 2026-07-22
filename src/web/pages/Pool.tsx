@@ -195,7 +195,7 @@ export function Pool() {
                       <AvailabilityPill availability={p.availability} from={p.available_from} />
                     </td>
                     <td>
-                      <ConsentPill consents={p.consents} />
+                      <ConsentPill consents={p.consents} verified={p.verified} />
                     </td>
                     <td>
                       {p.cv_filename ? (

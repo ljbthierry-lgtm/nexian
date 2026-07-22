@@ -4,6 +4,7 @@ import { runScheduledJobs } from "./cron";
 import type { AppContext, Env } from "./env";
 import { rememberOrigin } from "./lib/baseUrl";
 import { AppError } from "./lib/errors";
+import { harden } from "./lib/securityHeaders";
 import { log } from "./lib/log";
 import { requireAuth } from "./middleware/auth";
 import { actionRoutes } from "./modules/actions/routes";
@@ -43,12 +44,23 @@ app.onError((err, c) => {
 app.use("*", async (c, next) => {
   c.executionCtx?.waitUntil?.(rememberOrigin(c.env, c.req.url).catch(() => {}));
   await next();
-  c.header("X-Content-Type-Options", "nosniff");
-  c.header("X-Frame-Options", "DENY");
-  c.header("Referrer-Policy", "same-origin");
+  harden(c.res.headers);
 });
 
-app.get("/api/health", (c) => c.json({ ok: true, env: c.env.APP_ENV }));
+/**
+ * Uptime probe. It touches D1 on purpose: a health check that only proves the
+ * Worker booted stays green through a total database outage, which is precisely
+ * the failure someone needs to be told about.
+ */
+app.get("/api/health", async (c) => {
+  try {
+    await c.env.DB.prepare("SELECT 1").first();
+    return c.json({ ok: true, env: c.env.APP_ENV, db: "ok" });
+  } catch (e) {
+    log.error("health.db_unreachable", { error: e instanceof Error ? e.message : String(e) });
+    return c.json({ ok: false, env: c.env.APP_ENV, db: "unreachable" }, 503);
+  }
+});
 
 /* ---- token-authenticated email actions (no session) ---- */
 app.route("/a", actionRoutes);
@@ -91,9 +103,7 @@ app.notFound(async (c) => {
   // explicitly, or the login page would be frameable.
   const asset = await c.env.ASSETS.fetch(c.req.raw);
   const res = new Response(asset.body, asset);
-  res.headers.set("X-Content-Type-Options", "nosniff");
-  res.headers.set("X-Frame-Options", "DENY");
-  res.headers.set("Referrer-Policy", "same-origin");
+  harden(res.headers);
   return res;
 });
 

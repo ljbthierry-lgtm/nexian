@@ -1,12 +1,19 @@
 /** Staff authentication: bootstrap the first admin, sign in, sign out, set a password. */
 import { type Context, Hono } from "hono";
-import { deleteCookie, setCookie } from "hono/cookie";
+import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { z } from "zod";
 import type { AppContext } from "../../env";
-import { hashPassword, randomToken, sha256Hex, verifyPassword } from "../../lib/crypto";
+import {
+  hashPassword,
+  randomToken,
+  sha256Hex,
+  timingSafeEqual,
+  verifyPassword,
+} from "../../lib/crypto";
 import { first, run, uid } from "../../lib/db";
-import { badRequest, forbidden, unauthorized } from "../../lib/errors";
+import { badRequest, forbidden, tooManyRequests, unauthorized } from "../../lib/errors";
 import { log } from "../../lib/log";
+import { RATE_LIMITS, clientIp, hitRateLimit } from "../../lib/rateLimit";
 import { SESSION_COOKIE, SESSION_DAYS, requireAuth } from "../../middleware/auth";
 import { consumeActionToken } from "../notifications/tokens";
 
@@ -49,7 +56,14 @@ authRoutes.post("/bootstrap", async (c) => {
     key?: string;
   }>();
   if (!c.env.SETUP_KEY) throw forbidden("Bootstrap is disabled: SETUP_KEY is not configured");
-  if (body.key !== c.env.SETUP_KEY) throw forbidden("Invalid setup key");
+
+  // Open to the internet for as long as the app has no users, and one correct
+  // guess creates an administrator. Throttle it like a login, and compare in
+  // constant time so the key cannot be recovered a character at a time.
+  const ip = clientIp(c.req.raw.headers);
+  const check = await hitRateLimit(c.env.DB, RATE_LIMITS.login, `bootstrap:${ip}`);
+  if (!check.allowed) throw tooManyRequests("Too many attempts. Please wait and try again.");
+  if (!timingSafeEqual(body.key ?? "", c.env.SETUP_KEY)) throw forbidden("Invalid setup key");
 
   const existing = await first<{ n: number }>(c.env.DB, `SELECT COUNT(*) AS n FROM users`);
   if ((existing?.n ?? 0) > 0) throw forbidden("Already initialised — sign in instead");
@@ -69,13 +83,27 @@ authRoutes.post("/bootstrap", async (c) => {
     hash,
     salt,
   );
-  log.info("auth.bootstrap", { email: parsed.email });
+  log.info("auth.bootstrap", { user: id });
   await startSession(c, id);
   return c.json({ ok: true });
 });
 
 authRoutes.post("/login", async (c) => {
   const { email, password } = loginSchema.parse(await c.req.json());
+
+  // Counted per source IP and per account, so neither one client hammering the
+  // form nor many clients targeting one inbox gets unlimited guesses.
+  const ip = clientIp(c.req.raw.headers);
+  for (const identifier of [`ip:${ip}`, `email:${email.toLowerCase()}`]) {
+    const check = await hitRateLimit(c.env.DB, RATE_LIMITS.login, identifier);
+    if (!check.allowed) {
+      log.warn("auth.rate_limited", { identifier: identifier.split(":")[0], ip });
+      throw tooManyRequests(
+        `Too many sign-in attempts. Please wait ${Math.ceil(check.retryAfterSeconds / 60)} minutes and try again.`,
+      );
+    }
+  }
+
   const user = await first<{ id: string; pw_hash: string | null; pw_salt: string | null }>(
     c.env.DB,
     `SELECT id, pw_hash, pw_salt FROM users WHERE email = ? AND active = 1`,
@@ -147,5 +175,17 @@ authRoutes.post("/change-password", requireAuth(), async (c) => {
   }
   const { hash, salt } = await hashPassword(next);
   await run(c.env.DB, `UPDATE users SET pw_hash = ?, pw_salt = ? WHERE id = ?`, hash, salt, me.id);
+
+  // Changing a password is what someone does after losing a laptop, so every
+  // other session for this account has to stop working — keeping only the one
+  // making the request, which would otherwise be signed out mid-action.
+  const activeToken = getCookie(c, SESSION_COOKIE);
+  await run(
+    c.env.DB,
+    `DELETE FROM sessions WHERE user_id = ? AND token_hash != ?`,
+    me.id,
+    activeToken ? await sha256Hex(activeToken) : "",
+  );
+  log.info("auth.password_changed", { user: me.id });
   return c.json({ ok: true });
 });

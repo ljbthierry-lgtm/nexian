@@ -32,6 +32,15 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return (await res.text()) as unknown as T;
 }
 
+async function sendForm<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(path, { method: "POST", credentials: "same-origin", body: form });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+    throw new ApiError(res.status, data.error ?? "error", data.message ?? "Upload failed");
+  }
+  return (await res.json()) as T;
+}
+
 export const api = {
   get: <T>(path: string) => request<T>("GET", path),
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
@@ -40,12 +49,18 @@ export const api = {
   async upload<T>(path: string, file: File): Promise<T> {
     const form = new FormData();
     form.append("file", file);
-    const res = await fetch(path, { method: "POST", credentials: "same-origin", body: form });
-    if (!res.ok) {
-      const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
-      throw new ApiError(res.status, data.error ?? "error", data.message ?? "Upload failed");
-    }
-    return (await res.json()) as T;
+    return sendForm<T>(path, form);
+  },
+  /**
+   * Registration, with the CV in the same request. It travels here rather than
+   * in a follow-up call because the follow-up would need a session, and the
+   * server deliberately does not hand one out to an unverified caller.
+   */
+  async register<T>(profile: unknown, cv: File | null): Promise<T> {
+    const form = new FormData();
+    form.append("profile", JSON.stringify(profile));
+    if (cv) form.append("cv", cv);
+    return sendForm<T>("/api/public/register", form);
   },
 };
 
@@ -107,6 +122,8 @@ export interface PoolMember {
   cv_filename: string | null;
   updated_at: string;
   last_confirmed_at: string | null;
+  /** The address was proven by opening an emailed link; campaigns require it. */
+  verified: boolean;
   consents?: Consents;
 }
 

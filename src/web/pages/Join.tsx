@@ -11,7 +11,7 @@ import { Banner, ChipPicker } from "../components";
  */
 export function Join() {
   const [tax, setTax] = useState<Taxonomy | null>(null);
-  const [done, setDone] = useState<"new" | "existing" | null>(null);
+  const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -36,7 +36,6 @@ export function Join() {
   const [consent, setConsent] = useState({ data: false, alerts: false, news: false });
 
   const [cv, setCv] = useState<File | null>(null);
-  const [cvNote, setCvNote] = useState<string | null>(null);
 
   const [linkEmail, setLinkEmail] = useState("");
   const [linkSent, setLinkSent] = useState(false);
@@ -60,41 +59,32 @@ export function Join() {
     }
     setBusy(true);
     try {
-      const res = await api.post<{ ok: boolean; existing: boolean }>("/api/public/register", {
-        email: form.email.trim(),
-        first_name: form.first_name.trim(),
-        last_name: form.last_name.trim(),
-        phone: form.phone.trim() || undefined,
-        linkedin_url: form.linkedin_url.trim() || undefined,
-        headline: form.headline.trim() || undefined,
-        years_experience: form.years_experience ? Number(form.years_experience) : undefined,
-        skills,
-        industries,
-        languages,
-        daily_rate: form.daily_rate ? Number(form.daily_rate) : undefined,
-        availability: form.availability,
-        available_from: form.availability === "from_date" ? form.available_from : undefined,
-        location: form.location.trim() || undefined,
-        remote_ok: form.remote_ok,
-        freelancer_note: form.freelancer_note.trim() || undefined,
-        consent_data_processing: consent.data,
-        consent_mission_alerts: consent.alerts,
-        consent_news: consent.news,
-      });
+      await api.register<{ ok: boolean }>(
+        {
+          email: form.email.trim(),
+          first_name: form.first_name.trim(),
+          last_name: form.last_name.trim(),
+          phone: form.phone.trim() || undefined,
+          linkedin_url: form.linkedin_url.trim() || undefined,
+          headline: form.headline.trim() || undefined,
+          years_experience: form.years_experience ? Number(form.years_experience) : undefined,
+          skills,
+          industries,
+          languages,
+          daily_rate: form.daily_rate ? Number(form.daily_rate) : undefined,
+          availability: form.availability,
+          available_from: form.availability === "from_date" ? form.available_from : undefined,
+          location: form.location.trim() || undefined,
+          remote_ok: form.remote_ok,
+          freelancer_note: form.freelancer_note.trim() || undefined,
+          consent_data_processing: consent.data,
+          consent_mission_alerts: consent.alerts,
+          consent_news: consent.news,
+        },
+        cv,
+      );
 
-      // A brand-new registration signs you in, so the CV can go up right away.
-      if (!res.existing && cv) {
-        try {
-          await api.upload("/api/portal/cv", cv);
-        } catch (err) {
-          setCvNote(
-            err instanceof ApiError
-              ? `Your profile was saved, but the CV did not upload: ${err.message}`
-              : "Your profile was saved, but the CV did not upload.",
-          );
-        }
-      }
-      setDone(res.existing ? "existing" : "new");
+      setDone(true);
       window.scrollTo({ top: 0 });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
@@ -103,39 +93,25 @@ export function Join() {
     }
   }
 
-  if (done === "existing") {
+  // One confirmation for every outcome. The server deliberately answers the same
+  // way whether or not the address was already known, and this screen must not
+  // undo that by saying something different.
+  if (done) {
     return (
       <Shell>
-        <h1>You're already in the pool</h1>
+        <h1>Check your inbox</h1>
         <div className="card">
           <p>
-            That email address already has a profile with us. We've sent you a personal link to open
-            and update it — check your inbox.
-          </p>
-        </div>
-      </Shell>
-    );
-  }
-
-  if (done === "new") {
-    return (
-      <Shell>
-        <h1>You're in — thank you</h1>
-        <div className="card">
-          {cvNote && <Banner kind="warn">{cvNote}</Banner>}
-          <p>
-            Your profile is saved and we've emailed you a link to it. When a mission matches what
-            you do, we'll be in touch.
+            Thanks. We have sent a link to <strong>{form.email.trim()}</strong> — open it to see
+            your profile, change anything, or remove yourself.
           </p>
           <p>
-            You can change your day rate, availability and CV whenever you like — or delete your
-            profile entirely.
+            If a profile already existed for that address, the link opens it instead of creating a
+            second one.
           </p>
-          <div className="btn-row">
-            <a className="btn" href="/profile">
-              Open my profile
-            </a>
-          </div>
+          <p className="muted" style={{ fontSize: 13.5 }}>
+            Nothing else to do. When a mission matches what you do, we will be in touch.
+          </p>
         </div>
       </Shell>
     );

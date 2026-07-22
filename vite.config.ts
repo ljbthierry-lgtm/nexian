@@ -9,7 +9,10 @@ export default defineConfig({
   build: {
     outDir: "../../dist/web",
     emptyOutDir: true,
-    sourcemap: true,
+    // dist/web is served publicly by the Worker, so a sourcemap here is a
+    // half-megabyte download shipped to every visitor. Build with
+    // `vite build --sourcemap` when debugging a production bundle.
+    sourcemap: false,
   },
   server: {
     port: 5174,

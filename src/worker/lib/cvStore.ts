@@ -95,6 +95,44 @@ export async function deleteCv(db: D1Database, contactId: string): Promise<void>
   await run(db, `DELETE FROM cv_chunks WHERE contact_id = ?`, contactId);
 }
 
+/**
+ * Make an uploader-supplied filename safe to put in a Content-Disposition header.
+ *
+ * An allowlist rather than a blocklist: quotes end the header value early and
+ * control characters split the header outright, and it is easier to be sure about
+ * what is permitted than to enumerate everything that is not. Letters and digits
+ * of any script are kept, so accented names still read correctly.
+ */
+export function safeFilename(name: string | null | undefined, fallback = "cv"): string {
+  const cleaned = (name ?? "")
+    .replace(/[^\p{L}\p{N}._ ()-]/gu, "_")
+    .trim()
+    .slice(0, 120);
+  // A name that survived as nothing but separators ("___") is safe but useless to
+  // whoever downloads it, so fall back unless a letter or digit remains.
+  return /[\p{L}\p{N}]/u.test(cleaned) ? cleaned : fallback;
+}
+
+/**
+ * The download response for a stored CV. Both the freelancer's own download and
+ * the staff download go through here, so the headers cannot drift apart.
+ *
+ * The stored MIME type is never echoed back verbatim: it is mapped through the
+ * allowlist, and anything unrecognised is served as a generic binary attachment
+ * so a browser cannot be talked into rendering an upload inline.
+ */
+export function cvResponse(bytes: ArrayBuffer, filename: string | null, mime: string | null) {
+  const type = mime && ALLOWED_CV_TYPES[mime] ? mime : "application/octet-stream";
+  return new Response(bytes, {
+    headers: {
+      "Content-Type": type,
+      "Content-Disposition": `attachment; filename="${safeFilename(filename)}"`,
+      "X-Content-Type-Options": "nosniff",
+      "Cache-Control": "private, no-store",
+    },
+  });
+}
+
 /** D1 hands BLOBs back as ArrayBuffer or number[] depending on driver version. */
 function toBytes(value: ArrayBuffer | Uint8Array | number[]): Uint8Array {
   if (value instanceof Uint8Array) return value;

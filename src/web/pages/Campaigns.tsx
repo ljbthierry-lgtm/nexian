@@ -283,13 +283,19 @@ function Compose({
                 purpose: f.purpose,
                 segment: segment(),
               });
-              const res = await api.post<{ sent: number; failed: number }>(
+              // Large audiences are sent in batches, so a single press may not
+              // finish the job — say so plainly rather than implying it is done.
+              const res = await api.post<{ sent: number; failed: number; remaining: number }>(
                 `/api/campaigns/${created.id}/send`,
               );
               await onSent(
                 `Sent to ${res.sent} freelancer${res.sent === 1 ? "" : "s"}${
                   res.failed ? `, ${res.failed} failed` : ""
-                }.`,
+                }.${
+                  res.remaining > 0
+                    ? ` ${res.remaining} still to go — open the campaign and press Send again to continue.`
+                    : ""
+                }`,
               );
             } catch (err) {
               setError(err instanceof ApiError ? err.message : "Could not send");

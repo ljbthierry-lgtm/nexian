@@ -132,6 +132,14 @@ export function buildAudienceQuery(
   today = new Date(),
 ): { sql: string; params: unknown[] } {
   const frag = buildPoolFilter(segment, today);
+  // `verified_at` is the second half of the consent proof. Registration is a
+  // public form, so a consent row on its own only shows that somebody typed an
+  // address; the verification stamp shows that whoever owns that mailbox opened
+  // the link we sent there. A campaign requires both.
+  //
+  // Appended to the fragment rather than to the SQL, so it cannot end up dangling
+  // after an empty WHERE.
+  frag.where.push("p.verified_at IS NOT NULL");
   const sql = `
     SELECT ct.id, ct.email, ct.first_name, ct.last_name
     FROM contacts ct

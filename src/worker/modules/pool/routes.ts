@@ -4,6 +4,7 @@ import type { AppContext } from "../../env";
 import { consentsFor } from "../../lib/consent";
 import { toCsv } from "../../lib/csv";
 import { all, first } from "../../lib/db";
+import { parseLabels } from "../../lib/labels";
 import { type Segment, buildPoolFilter, whereClause } from "../../lib/segment";
 import { requireAuth } from "../../middleware/auth";
 
@@ -56,24 +57,16 @@ interface PoolRow {
   cv_filename: string | null;
   updated_at: string;
   last_confirmed_at: string | null;
+  verified_at: string | null;
 }
 
 const POOL_SELECT = `
   SELECT ct.id, ct.email, ct.first_name, ct.last_name, ct.stage,
          p.headline, p.years_experience, p.skills, p.industries, p.languages,
          p.daily_rate, p.currency, p.availability, p.available_from, p.location,
-         p.remote_ok, p.cv_filename, p.updated_at, p.last_confirmed_at
+         p.remote_ok, p.cv_filename, p.updated_at, p.last_confirmed_at, p.verified_at
   FROM contacts ct
   JOIN profiles p ON p.contact_id = ct.id`;
-
-function parseArr(raw: string): string[] {
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
-  } catch {
-    return [];
-  }
-}
 
 poolRoutes.get("/", async (c) => {
   const segment = segmentFromQuery(c.req.query());
@@ -100,10 +93,11 @@ poolRoutes.get("/", async (c) => {
     total: total?.n ?? rows.length,
     freelancers: rows.map((r) => ({
       ...r,
-      skills: parseArr(r.skills),
-      industries: parseArr(r.industries),
-      languages: parseArr(r.languages),
+      skills: parseLabels(r.skills),
+      industries: parseLabels(r.industries),
+      languages: parseLabels(r.languages),
       remote_ok: r.remote_ok === 1,
+      verified: r.verified_at !== null,
       consents: consents.get(r.id),
     })),
   });
@@ -171,9 +165,9 @@ poolRoutes.get("/export/csv", async (c) => {
       r.email,
       r.headline,
       r.years_experience ?? "",
-      parseArr(r.skills).join("; "),
-      parseArr(r.industries).join("; "),
-      parseArr(r.languages).join("; "),
+      parseLabels(r.skills).join("; "),
+      parseLabels(r.industries).join("; "),
+      parseLabels(r.languages).join("; "),
       r.daily_rate ?? "",
       r.availability,
       r.available_from ?? "",
