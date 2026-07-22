@@ -1,10 +1,12 @@
 /** The talent pool: registered freelancers, filtered the same way a campaign is. */
 import { Hono } from "hono";
 import type { AppContext } from "../../env";
+import { recordAccess } from "../../lib/accessLog";
 import { consentsFor } from "../../lib/consent";
 import { toCsv } from "../../lib/csv";
 import { all, first } from "../../lib/db";
 import { parseLabels } from "../../lib/labels";
+import { clientIp } from "../../lib/rateLimit";
 import { type Segment, buildPoolFilter, whereClause } from "../../lib/segment";
 import { requireAuth } from "../../middleware/auth";
 
@@ -178,6 +180,14 @@ poolRoutes.get("/export/csv", async (c) => {
       r.updated_at,
     ]),
   );
+  const user = c.get("user");
+  await recordAccess(c.env.DB, {
+    userId: user.id,
+    userName: user.name,
+    action: "pool_export",
+    detail: `${rows.length} freelancers`,
+    ip: clientIp(c.req.raw.headers),
+  });
   return new Response(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",

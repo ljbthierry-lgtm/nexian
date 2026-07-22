@@ -2,6 +2,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppContext, Stage } from "../../env";
+import { recordAccess } from "../../lib/accessLog";
 import { logActivity } from "../../lib/activity";
 import { consentHistory, consentsFor, currentConsents } from "../../lib/consent";
 import { mapImportRows, parseCsv, toCsv } from "../../lib/csv";
@@ -9,6 +10,7 @@ import { cvResponse, getCv } from "../../lib/cvStore";
 import { all, first, run, uid } from "../../lib/db";
 import { parseLabels } from "../../lib/labels";
 import { badRequest, notFound } from "../../lib/errors";
+import { clientIp } from "../../lib/rateLimit";
 import { suppressContact } from "../../lib/suppress";
 import { filterSuppressed, isSuppressed } from "../../lib/suppression";
 import { requireAuth } from "../../middleware/auth";
@@ -333,6 +335,17 @@ contactRoutes.get("/:id/cv", async (c) => {
   );
   const bytes = await getCv(c.env.DB, id);
   if (!bytes || !meta?.cv_filename) throw notFound("No CV on file for this freelancer");
+
+  // Recorded before the bytes leave: a CV is the most personal thing in here.
+  const user = c.get("user");
+  await recordAccess(c.env.DB, {
+    userId: user.id,
+    userName: user.name,
+    action: "cv_download",
+    contactId: id,
+    detail: meta.cv_filename,
+    ip: clientIp(c.req.raw.headers),
+  });
   return cvResponse(bytes, meta.cv_filename, meta.cv_mime);
 });
 
@@ -454,6 +467,14 @@ contactRoutes.get("/export/csv", async (c) => {
       ];
     }),
   );
+  const user = c.get("user");
+  await recordAccess(c.env.DB, {
+    userId: user.id,
+    userName: user.name,
+    action: "contacts_export",
+    detail: `${rows.length} contacts`,
+    ip: clientIp(c.req.raw.headers),
+  });
   return new Response(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",

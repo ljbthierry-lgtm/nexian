@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, type Me, api } from "../api";
-import { Banner, formatDate } from "../components";
+import { Banner, Stat, formatDate } from "../components";
 
 interface StaffUser {
   id: string;
@@ -22,7 +22,7 @@ interface TaxonomyRow {
 
 /** Staff accounts, the picker lists, and the GDPR housekeeping controls. */
 export function Settings({ me }: { me: Me }) {
-  const [tab, setTab] = useState<"team" | "lists" | "privacy">("team");
+  const [tab, setTab] = useState<"team" | "lists" | "privacy" | "access">("team");
 
   if (me.role !== "admin") {
     return (
@@ -37,7 +37,7 @@ export function Settings({ me }: { me: Me }) {
     <>
       <h1>Settings</h1>
       <div className="btn-row" style={{ marginBottom: 16 }}>
-        {(["team", "lists", "privacy"] as const).map((key) => (
+        {(["team", "lists", "privacy", "access"] as const).map((key) => (
           <button
             key={key}
             type="button"
@@ -48,7 +48,9 @@ export function Settings({ me }: { me: Me }) {
               ? "Team"
               : key === "lists"
                 ? "Skills & industries"
-                : "Privacy & retention"}
+                : key === "privacy"
+                  ? "Privacy & retention"
+                  : "Access log"}
           </button>
         ))}
       </div>
@@ -56,6 +58,7 @@ export function Settings({ me }: { me: Me }) {
       {tab === "team" && <Team me={me} />}
       {tab === "lists" && <Lists />}
       {tab === "privacy" && <PrivacyOps />}
+      {tab === "access" && <AccessLog />}
     </>
   );
 }
@@ -458,6 +461,86 @@ function PrivacyOps() {
                         {row.status}
                       </span>
                       {row.error && <div className="sub">{row.error.slice(0, 80)}</div>}
+                    </td>
+                    <td className="sub">{formatDate(row.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+/**
+ * Who read personal data.
+ *
+ * The activity trail on a contact records changes; this records reads, which is
+ * what a quiet breach actually looks like — nobody edits anything, somebody just
+ * downloads every CV on their way out the door.
+ */
+function AccessLog() {
+  const [data, setData] = useState<{
+    entries: {
+      id: string;
+      user_name: string;
+      action: string;
+      label: string;
+      detail: string | null;
+      first_name: string | null;
+      last_name: string | null;
+      created_at: string;
+    }[];
+    last30Days: { cvDownloads: number; bulkExports: number; staffActive: number };
+  } | null>(null);
+
+  useEffect(() => {
+    void api.get<typeof data>("/api/admin/access-log").then(setData);
+  }, []);
+
+  if (!data) return <p className="sub">Loading…</p>;
+
+  return (
+    <>
+      <div className="stats">
+        <Stat value={data.last30Days.cvDownloads} label="CVs downloaded (30 days)" />
+        <Stat value={data.last30Days.bulkExports} label="Bulk exports (30 days)" tone="amber" />
+        <Stat value={data.last30Days.staffActive} label="Staff who accessed data" />
+      </div>
+
+      <div className="card">
+        <h3>Recent access</h3>
+        <p className="sub">
+          Every CV download and every CSV export, newest first. This log cannot be edited or deleted
+          from inside the application, including by an administrator.
+        </p>
+        {data.entries.length === 0 ? (
+          <p className="sub">Nothing yet — no CV or export has been downloaded.</p>
+        ) : (
+          <div className="tablewrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Who</th>
+                  <th>What</th>
+                  <th>Whose record</th>
+                  <th>When</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.entries.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.user_name || "—"}</td>
+                    <td>
+                      {row.label}
+                      {row.detail && <div className="sub">{row.detail}</div>}
+                    </td>
+                    <td className="sub">
+                      {row.first_name || row.last_name
+                        ? `${row.first_name ?? ""} ${row.last_name ?? ""}`.trim()
+                        : "—"}
                     </td>
                     <td className="sub">{formatDate(row.created_at)}</td>
                   </tr>

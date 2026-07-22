@@ -362,6 +362,30 @@ label {
   font-weight: 400;
   color: var(--ink-soft);
 }
+/* The sign-in code: wide tracking so six digits are easy to check against the
+   email before pressing the button. */
+.code-input {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  padding: 12px 11px;
+}
+/* A button that reads as a link — used where the action is a change of mind
+   rather than a destination, so it must not be an anchor. */
+.linklike {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.linklike:hover {
+  color: var(--accent-deep);
+}
 input,
 select,
 textarea {

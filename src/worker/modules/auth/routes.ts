@@ -10,11 +10,24 @@ import {
   timingSafeEqual,
   verifyPassword,
 } from "../../lib/crypto";
+import { resolveBaseUrl } from "../../lib/baseUrl";
 import { first, run, uid } from "../../lib/db";
 import { badRequest, forbidden, tooManyRequests, unauthorized } from "../../lib/errors";
 import { log } from "../../lib/log";
+import {
+  type ChallengeState,
+  MFA_CODE_TTL_MINUTES,
+  challengeExpiry,
+  generateCode,
+  hashCode,
+  mfaActive,
+  verdictMessage,
+  verifyChallenge,
+} from "../../lib/mfa";
 import { RATE_LIMITS, clientIp, hitRateLimit } from "../../lib/rateLimit";
 import { SESSION_COOKIE, SESSION_DAYS, requireAuth } from "../../middleware/auth";
+import { sendEmail } from "../notifications/resend";
+import { signInCodeEmail } from "../notifications/templates";
 import { consumeActionToken } from "../notifications/tokens";
 
 export const authRoutes = new Hono<AppContext>();
@@ -104,9 +117,15 @@ authRoutes.post("/login", async (c) => {
     }
   }
 
-  const user = await first<{ id: string; pw_hash: string | null; pw_salt: string | null }>(
+  const user = await first<{
+    id: string;
+    name: string;
+    email: string;
+    pw_hash: string | null;
+    pw_salt: string | null;
+  }>(
     c.env.DB,
-    `SELECT id, pw_hash, pw_salt FROM users WHERE email = ? AND active = 1`,
+    `SELECT id, name, email, pw_hash, pw_salt FROM users WHERE email = ? AND active = 1`,
     email.toLowerCase(),
   );
   // Same message either way: never reveal whether an address exists.
@@ -114,8 +133,107 @@ authRoutes.post("/login", async (c) => {
   if (!user?.pw_hash || !user.pw_salt) throw generic;
   if (!(await verifyPassword(password, user.pw_salt, user.pw_hash))) throw generic;
 
+  // The password alone is no longer a session — it is permission to be sent a
+  // code. Where email cannot send, there is nothing to send, so we say so rather
+  // than lock the account out of its own application.
+  if (mfaActive(c.env)) {
+    const challengeId = await issueChallenge(c, user);
+    log.info("auth.mfa_challenged", { user: user.id });
+    return c.json({ ok: true, mfaRequired: true, challengeId });
+  }
+
   await startSession(c, user.id);
-  log.info("auth.login", { user: user.id });
+  log.warn("auth.login_without_second_factor", { user: user.id, reason: "email_not_configured" });
+  return c.json({ ok: true, mfaRequired: false, mfaActive: false });
+});
+
+/**
+ * Create a challenge and email the code.
+ *
+ * The challenge id returned to the browser is a random token that names the
+ * challenge, never the user: the second step looks the account up from it
+ * server-side, so a caller cannot point a code they were sent at somebody
+ * else's account.
+ */
+async function issueChallenge(
+  c: Context<AppContext>,
+  user: { id: string; name: string; email: string },
+): Promise<string> {
+  const challengeId = randomToken(24);
+  const code = generateCode();
+  const baseUrl = await resolveBaseUrl(c.env);
+
+  await run(
+    c.env.DB,
+    `INSERT INTO login_challenges (id, user_id, code_hash, expires_at, ip) VALUES (?, ?, ?, ?, ?)`,
+    challengeId,
+    user.id,
+    await hashCode(challengeId, code),
+    challengeExpiry(),
+    clientIp(c.req.raw.headers),
+  );
+
+  const mail = signInCodeEmail(
+    { companyName: c.env.COMPANY_NAME, baseUrl },
+    { name: user.name, code, minutes: MFA_CODE_TTL_MINUTES },
+  );
+  await sendEmail(c.env, {
+    to: user.email,
+    subject: mail.subject,
+    html: mail.html,
+    template: "sign_in_code",
+  });
+  return challengeId;
+}
+
+/** Second step: exchange a challenge and its code for a session. */
+authRoutes.post("/verify-code", async (c) => {
+  const { challengeId, code } = z
+    .object({ challengeId: z.string().min(1).max(100), code: z.string().min(1).max(20) })
+    .parse(await c.req.json());
+
+  // Throttled on its own, so a stolen password plus unlimited guessing at the
+  // code is not a way in even across many challenges.
+  const ip = clientIp(c.req.raw.headers);
+  const check = await hitRateLimit(c.env.DB, RATE_LIMITS.login, `mfa:${ip}`);
+  if (!check.allowed) {
+    throw tooManyRequests(
+      `Too many attempts. Please wait ${Math.ceil(check.retryAfterSeconds / 60)} minutes and try again.`,
+    );
+  }
+
+  const challenge = await first<ChallengeState & { user_id: string }>(
+    c.env.DB,
+    `SELECT user_id, code_hash, attempts, expires_at, consumed_at FROM login_challenges WHERE id = ?`,
+    challengeId,
+  );
+  // An unknown challenge id is indistinguishable from an expired one on purpose.
+  if (!challenge) throw unauthorized("That code has expired. Sign in again to get a new one.");
+
+  const verdict = await verifyChallenge(challengeId, challenge, code);
+  if (!verdict.ok) {
+    await run(
+      c.env.DB,
+      `UPDATE login_challenges SET attempts = attempts + 1 WHERE id = ?`,
+      challengeId,
+    );
+    log.warn("auth.mfa_failed", { user: challenge.user_id, reason: verdict.reason });
+    throw unauthorized(verdictMessage(verdict));
+  }
+
+  // Spend the challenge before issuing the session, and only if it was still
+  // unspent — two tabs submitting the same code must not yield two sessions.
+  const spend = await run(
+    c.env.DB,
+    `UPDATE login_challenges SET consumed_at = datetime('now') WHERE id = ? AND consumed_at IS NULL`,
+    challengeId,
+  );
+  if (!spend.meta.changes) {
+    throw unauthorized("That code has already been used. Sign in again to get a new one.");
+  }
+
+  await startSession(c, challenge.user_id);
+  log.info("auth.login", { user: challenge.user_id, secondFactor: true });
   return c.json({ ok: true });
 });
 
@@ -129,10 +247,17 @@ authRoutes.post("/logout", async (c) => {
   return c.json({ ok: true });
 });
 
-/** Whether the app still needs its first admin — drives the login screen. */
+/**
+ * Whether the app still needs its first admin, and whether the second factor is
+ * live. The second flag is public on purpose: a protection that is off should be
+ * visible on the sign-in page, not buried in a setting nobody opens.
+ */
 authRoutes.get("/state", async (c) => {
   const row = await first<{ n: number }>(c.env.DB, `SELECT COUNT(*) AS n FROM users`);
-  return c.json({ needsBootstrap: (row?.n ?? 0) === 0 });
+  return c.json({
+    needsBootstrap: (row?.n ?? 0) === 0,
+    mfaActive: mfaActive(c.env),
+  });
 });
 
 authRoutes.get("/me", requireAuth(), (c) => c.json(c.get("user")));

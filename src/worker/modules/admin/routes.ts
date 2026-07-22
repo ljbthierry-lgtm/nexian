@@ -2,6 +2,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppContext } from "../../env";
+import { ACCESS_LABEL, type AccessAction } from "../../lib/accessLog";
 import { resolveBaseUrl } from "../../lib/baseUrl";
 import { all, first, run, uid } from "../../lib/db";
 import { badRequest, notFound } from "../../lib/errors";
@@ -227,4 +228,41 @@ adminRoutes.get("/email-log", async (c) => {
      FROM email_log ORDER BY created_at DESC LIMIT 200`,
   );
   return c.json({ emails: rows });
+});
+
+/**
+ * Who read personal data: CV downloads and bulk exports.
+ *
+ * Admin-only, because it names members of staff. The freelancer-facing export
+ * deliberately does not include it — telling a data subject which colleague
+ * opened their file would expose internal operations without helping them.
+ */
+adminRoutes.get("/access-log", async (c) => {
+  const contactId = c.req.query("contactId");
+  const rows = await all<Record<string, unknown>>(
+    c.env.DB,
+    `SELECT a.id, a.user_name, a.action, a.contact_id, a.detail, a.created_at,
+            ct.first_name, ct.last_name
+     FROM access_log a
+     LEFT JOIN contacts ct ON ct.id = a.contact_id
+     ${contactId ? "WHERE a.contact_id = ?" : ""}
+     ORDER BY a.created_at DESC LIMIT 300`,
+    ...(contactId ? [contactId] : []),
+  );
+  const summary = await first<{ downloads: number; exports: number; people: number }>(
+    c.env.DB,
+    `SELECT
+       SUM(CASE WHEN action = 'cv_download' THEN 1 ELSE 0 END) AS downloads,
+       SUM(CASE WHEN action IN ('pool_export','contacts_export') THEN 1 ELSE 0 END) AS exports,
+       COUNT(DISTINCT user_id) AS people
+     FROM access_log WHERE created_at > datetime('now', '-30 days')`,
+  );
+  return c.json({
+    entries: rows.map((r) => ({ ...r, label: ACCESS_LABEL[r.action as AccessAction] })),
+    last30Days: {
+      cvDownloads: summary?.downloads ?? 0,
+      bulkExports: summary?.exports ?? 0,
+      staffActive: summary?.people ?? 0,
+    },
+  });
 });

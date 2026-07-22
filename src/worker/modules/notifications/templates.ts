@@ -185,6 +185,34 @@ export function campaignEmail(
   };
 }
 
+/**
+ * The staff sign-in code.
+ *
+ * No link and no button anywhere in this email. A second factor that can be
+ * completed by clicking is one a phishing page can relay for you; making the
+ * recipient carry six digits back to a window they opened themselves is the
+ * whole point. It also tells them what to do if they were not signing in,
+ * because an unexpected code means somebody already has the password.
+ */
+export function signInCodeEmail(
+  ctx: TemplateContext,
+  o: { name: string; code: string; minutes: number },
+): RenderedEmail {
+  const body = `
+    <p>${greeting(o.name)}</p>
+    <p>Your sign-in code for the ${esc(ctx.companyName)} talent pool:</p>
+    <p style="font-size:34px;font-weight:700;letter-spacing:.18em;margin:18px 0;
+       font-family:Consolas,Menlo,monospace;color:#5A104C">${esc(o.code)}</p>
+    <p>It expires in ${o.minutes} minutes and can be used once.</p>
+    <p style="font-size:13px;color:#8a8194;margin-top:20px">
+      If you were not signing in, someone else knows your password. Change it as soon
+      as you can, and tell whoever administers the platform.</p>`;
+  return {
+    subject: `${o.code} is your ${ctx.companyName} sign-in code`,
+    html: emailShell({ body, companyName: ctx.companyName, baseUrl: ctx.baseUrl }),
+  };
+}
+
 /** Staff invitation / password reset. */
 export function setPasswordEmail(
   ctx: TemplateContext,
