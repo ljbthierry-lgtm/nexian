@@ -18,7 +18,7 @@ run_worker_first = ["/api/*", "/a/*"]
 [[d1_databases]]
 binding = "DB"
 database_name = "nexian_talent"
-database_id = "REPLACE_AFTER_wrangler_d1_create"   # npm run setup:cloudflare fills this in
+database_id = "77507b3f-e62a-4202-9cfc-809f6b94de33"   # wrangler d1 create nexian_talent
 
 [triggers]
 # Daily 07:00 UTC: outreach follow-ups, availability reminders, GDPR retention sweep.
