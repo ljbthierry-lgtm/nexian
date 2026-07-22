@@ -353,7 +353,6 @@ portalRoutes.post("/delete", async (c) => {
   // same list would quietly bring this person back.
   await suppressContact(c.env, {
     contactId: contact.id,
-    email: contact.email,
     reason: "Profile deleted by the freelancer",
     source: "profile_page",
   });

@@ -11,8 +11,15 @@ import { all, first, run, uid } from "../../lib/db";
 import { parseLabels } from "../../lib/labels";
 import { badRequest, notFound } from "../../lib/errors";
 import { clientIp } from "../../lib/rateLimit";
+import { deriveInviteStatus } from "../../lib/inviteStatus";
+import { linkedinKey } from "../../lib/linkedinKey";
 import { suppressContact } from "../../lib/suppress";
-import { filterSuppressed, isSuppressed } from "../../lib/suppression";
+import {
+  emailHash,
+  filterSuppressedHashes,
+  isSuppressed,
+  linkedinHash,
+} from "../../lib/suppression";
 import { requireAuth } from "../../middleware/auth";
 
 export const contactRoutes = new Hono<AppContext>();
@@ -22,7 +29,8 @@ const STAGES: Stage[] = ["prospect", "contacted", "registered", "vetted", "on_mi
 
 interface ContactRow {
   id: string;
-  email: string;
+  email: string | null;
+  linkedin_key: string | null;
   first_name: string;
   last_name: string;
   phone: string | null;
@@ -69,7 +77,7 @@ contactRoutes.get("/", async (c) => {
 
   const rows = await all<ContactRow>(
     c.env.DB,
-    `SELECT ct.id, ct.email, ct.first_name, ct.last_name, ct.phone, ct.linkedin_url, ct.source,
+    `SELECT ct.id, ct.email, ct.linkedin_key, ct.first_name, ct.last_name, ct.phone, ct.linkedin_url, ct.source,
             ct.source_note, ct.stage, ct.suppressed, ct.suppressed_reason, ct.outreach_count,
             ct.last_outreach_at, ct.linkedin_state, ct.anonymized_at, ct.created_at,
             (SELECT COUNT(*) FROM profiles p WHERE p.contact_id = ct.id) AS has_profile
@@ -99,6 +107,16 @@ contactRoutes.get("/", async (c) => {
       suppressed: r.suppressed === 1,
       has_profile: r.has_profile > 0,
       consents: consents.get(r.id),
+      // Derived here, once, so every screen shows the same funnel position.
+      invite_status: deriveInviteStatus({
+        hasEmail: r.email !== null,
+        hasLinkedin: r.linkedin_key !== null || Boolean(r.linkedin_url),
+        hasProfile: r.has_profile > 0,
+        suppressed: r.suppressed === 1,
+        anonymized: r.anonymized_at !== null,
+        outreachCount: r.outreach_count,
+        linkedinState: r.linkedin_state as "none" | "queued" | "sent",
+      }),
     })),
   });
 });
@@ -131,7 +149,7 @@ contactRoutes.get("/stats", async (c) => {
 });
 
 const createSchema = z.object({
-  email: z.string().email(),
+  email: z.string().email().optional(),
   first_name: z.string().trim().max(80).default(""),
   last_name: z.string().trim().max(80).default(""),
   phone: z.string().trim().max(40).optional(),
@@ -142,14 +160,36 @@ const createSchema = z.object({
 
 contactRoutes.post("/", async (c) => {
   const input = createSchema.parse(await c.req.json());
-  const email = input.email.trim().toLowerCase();
-  const existing = await first<{ id: string }>(
-    c.env.DB,
-    `SELECT id FROM contacts WHERE email = ?`,
-    email,
-  );
-  if (existing) throw badRequest("That email address is already in the list.", "duplicate");
-  if (await isSuppressed(c.env.DB, email)) {
+  const email = input.email?.trim().toLowerCase();
+  const liKey = linkedinKey(input.linkedin_url);
+  if (!email && !liKey) {
+    throw badRequest(
+      "A contact needs an email address or a LinkedIn profile URL — otherwise nobody can ever reach them.",
+      "no_channel",
+    );
+  }
+
+  if (email) {
+    const existing = await first<{ id: string }>(
+      c.env.DB,
+      `SELECT id FROM contacts WHERE email = ?`,
+      email,
+    );
+    if (existing) throw badRequest("That email address is already in the list.", "duplicate");
+  }
+  if (liKey) {
+    const existing = await first<{ id: string }>(
+      c.env.DB,
+      `SELECT id FROM contacts WHERE linkedin_key = ?`,
+      liKey,
+    );
+    if (existing) throw badRequest("That LinkedIn profile is already in the list.", "duplicate");
+  }
+
+  const optedOut =
+    (email && (await isSuppressed(c.env.DB, email))) ||
+    (liKey && (await filterSuppressedHashes(c.env.DB, [await linkedinHash(liKey)])).size > 0);
+  if (optedOut) {
     throw badRequest(
       "This person has asked never to be contacted again. They can only come back by registering themselves.",
       "suppressed",
@@ -159,14 +199,15 @@ contactRoutes.post("/", async (c) => {
   const id = uid();
   await run(
     c.env.DB,
-    `INSERT INTO contacts (id, email, first_name, last_name, phone, linkedin_url, source, source_note)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO contacts (id, email, first_name, last_name, phone, linkedin_url, linkedin_key, source, source_note)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
-    email,
+    email ?? null,
     input.first_name,
     input.last_name,
     input.phone ?? null,
     input.linkedin_url ?? null,
+    liKey,
     input.source,
     input.source_note ?? null,
   );
@@ -279,11 +320,7 @@ contactRoutes.post("/:id/suppress", async (c) => {
     })
     .parse(await c.req.json().catch(() => ({})));
 
-  const target = await first<{ email: string }>(
-    c.env.DB,
-    `SELECT email FROM contacts WHERE id = ?`,
-    id,
-  );
+  const target = await first<{ id: string }>(c.env.DB, `SELECT id FROM contacts WHERE id = ?`, id);
   if (!target) throw notFound("No such contact");
 
   if (suppressed) {
@@ -291,7 +328,6 @@ contactRoutes.post("/:id/suppress", async (c) => {
     // recorded identically — including the consent withdrawals.
     await suppressContact(c.env, {
       contactId: id,
-      email: target.email,
       reason,
       source: "admin",
       actorUserId: c.get("user").id,
@@ -362,59 +398,107 @@ contactRoutes.post("/import", async (c) => {
     })
     .parse(await c.req.json());
 
-  const parsed = mapImportRows(parseCsv(csv));
+  const parsed = mapImportRows(parseCsv(csv), linkedinKey);
   if (!parsed.rows.length) {
     return c.json({
       ok: false,
       imported: 0,
       duplicates: 0,
+      suppressed: 0,
       skipped: parsed.skipped,
+      warnings: parsed.warnings,
       unmappedHeaders: parsed.unmappedHeaders,
     });
   }
 
-  const emails = parsed.rows.map((r) => r.email);
-  const existingRows = await all<{ email: string }>(
-    c.env.DB,
-    `SELECT email FROM contacts WHERE email IN (${emails.map(() => "?").join(", ")})`,
-    ...emails,
+  // A row is a duplicate if EITHER identity is already known: the same person
+  // imported last month by email must not reappear via their LinkedIn URL.
+  const emails = parsed.rows.flatMap((r) => (r.email ? [r.email] : []));
+  const liKeys = parsed.rows.flatMap((r) => (r.linkedin_key ? [r.linkedin_key] : []));
+  const existingEmails = new Set(
+    emails.length
+      ? (
+          await all<{ email: string }>(
+            c.env.DB,
+            `SELECT email FROM contacts WHERE email IN (${emails.map(() => "?").join(", ")})`,
+            ...emails,
+          )
+        ).map((r) => r.email)
+      : [],
   );
-  const existing = new Set(existingRows.map((r) => r.email));
-  // People who previously opted out stay out, even though their record may be
-  // long gone — this is the whole point of keeping the hashed list.
-  const blocked = await filterSuppressed(c.env.DB, emails);
+  const existingKeys = new Set(
+    liKeys.length
+      ? (
+          await all<{ linkedin_key: string }>(
+            c.env.DB,
+            `SELECT linkedin_key FROM contacts WHERE linkedin_key IN (${liKeys.map(() => "?").join(", ")})`,
+            ...liKeys,
+          )
+        ).map((r) => r.linkedin_key)
+      : [],
+  );
 
-  const fresh = parsed.rows.filter((r) => !existing.has(r.email) && !blocked.has(r.email));
+  // People who previously opted out stay out, even though their record may be
+  // long gone — under whichever identity they opted out with.
+  const hashOf = new Map<string, string>();
+  for (const row of parsed.rows) {
+    if (row.email) hashOf.set(`e:${row.email}`, await emailHash(row.email));
+    if (row.linkedin_key) hashOf.set(`l:${row.linkedin_key}`, await linkedinHash(row.linkedin_key));
+  }
+  const blockedHashes = await filterSuppressedHashes(c.env.DB, [...hashOf.values()]);
+  const isBlocked = (row: (typeof parsed.rows)[number]) =>
+    (row.email && blockedHashes.has(hashOf.get(`e:${row.email}`) ?? "")) ||
+    (row.linkedin_key && blockedHashes.has(hashOf.get(`l:${row.linkedin_key}`) ?? ""));
+
+  const isExisting = (row: (typeof parsed.rows)[number]) =>
+    (row.email !== undefined && existingEmails.has(row.email)) ||
+    (row.linkedin_key !== undefined && existingKeys.has(row.linkedin_key));
+
+  let suppressedCount = 0;
+  let duplicates = 0;
   const actor = c.get("user").id;
-  for (const row of fresh) {
+  let imported = 0;
+
+  for (const row of parsed.rows) {
+    if (isExisting(row)) {
+      duplicates++;
+      continue;
+    }
+    if (isBlocked(row)) {
+      suppressedCount++;
+      continue;
+    }
     const id = uid();
     await run(
       c.env.DB,
-      `INSERT INTO contacts (id, email, first_name, last_name, phone, linkedin_url, source, source_note)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO contacts (id, email, first_name, last_name, phone, linkedin_url, linkedin_key, source, source_note)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
-      row.email,
+      row.email ?? null,
       row.first_name,
       row.last_name,
       row.phone ?? null,
       row.linkedin_url ?? null,
+      row.linkedin_key ?? null,
       source,
       sourceNote ?? row.source_note ?? null,
     );
+    imported++;
     await logActivity(c.env.DB, {
       contactId: id,
       kind: "imported",
-      summary: `Imported from a ${source} list — opted out by default`,
+      summary: `Imported from a ${source} list — opted out by default${row.email ? "" : " (LinkedIn only, no email)"}`,
       actorUserId: actor,
     });
   }
 
   return c.json({
     ok: true,
-    imported: fresh.length,
-    duplicates: parsed.rows.filter((r) => existing.has(r.email)).length,
-    suppressed: blocked.size,
+    imported,
+    duplicates,
+    suppressed: suppressedCount,
     skipped: parsed.skipped,
+    warnings: parsed.warnings,
     unmappedHeaders: parsed.unmappedHeaders,
   });
 });
@@ -423,7 +507,7 @@ contactRoutes.post("/import", async (c) => {
 contactRoutes.get("/export/csv", async (c) => {
   const rows = await all<ContactRow>(
     c.env.DB,
-    `SELECT ct.id, ct.email, ct.first_name, ct.last_name, ct.phone, ct.linkedin_url, ct.source,
+    `SELECT ct.id, ct.email, ct.linkedin_key, ct.first_name, ct.last_name, ct.phone, ct.linkedin_url, ct.source,
             ct.stage, ct.suppressed, ct.outreach_count, ct.last_outreach_at, ct.created_at,
             (SELECT COUNT(*) FROM profiles p WHERE p.contact_id = ct.id) AS has_profile
      FROM contacts ct WHERE ct.anonymized_at IS NULL ORDER BY ct.created_at DESC`,

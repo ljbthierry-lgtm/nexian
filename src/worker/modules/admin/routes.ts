@@ -10,7 +10,13 @@ import { badRequest, notFound } from "../../lib/errors";
 import { clientIp } from "../../lib/rateLimit";
 import { requireAuth, requireRole } from "../../middleware/auth";
 import { sendEmail } from "../notifications/resend";
-import { setPasswordEmail } from "../notifications/templates";
+import {
+  availabilityReminderEmail,
+  followUpEmail,
+  inviteEmail,
+  setPasswordEmail,
+  welcomeEmail,
+} from "../notifications/templates";
 import { createActionToken } from "../notifications/tokens";
 import { findExpiredProspects, runRetentionSweep } from "./retention";
 
@@ -371,4 +377,56 @@ adminRoutes.get("/access-log/export/csv", async (c) => {
       "Content-Disposition": `attachment; filename="nexian-access-log.csv"`,
     },
   });
+});
+
+/* ---------------------------------------------------------------- previews */
+
+/**
+ * The emails exactly as a freelancer receives them, rendered with sample data.
+ *
+ * Sample data on purpose: previewing must never read a real freelancer's
+ * record, and a preview link must never be a live token — the buttons in these
+ * renders point at the registration page or nowhere.
+ */
+adminRoutes.get("/preview/email", async (c) => {
+  const template = c.req.query("template") ?? "invite";
+  const baseUrl = await resolveBaseUrl(c.env);
+  const ctx = { companyName: c.env.COMPANY_NAME, baseUrl };
+  const sample = {
+    firstName: "Sofie",
+    senderName: "Laurent Thierry",
+    registerUrl: `${baseUrl}/join`,
+    optOutUrl: `${baseUrl}/join#preview-only`,
+    portalUrl: `${baseUrl}/join#preview-only`,
+    unsubscribeUrl: `${baseUrl}/join#preview-only`,
+  };
+
+  let rendered: { subject: string; html: string };
+  switch (template) {
+    case "invite":
+      rendered = inviteEmail(ctx, { ...sample, source: "linkedin" });
+      break;
+    case "followup":
+      rendered = followUpEmail(ctx, sample);
+      break;
+    case "welcome":
+      rendered = welcomeEmail(ctx, {
+        firstName: sample.firstName,
+        portalUrl: sample.portalUrl,
+        consentSummary: ["Store my profile to match me with missions", "Mission alerts"],
+      });
+      break;
+    case "reminder":
+      rendered = availabilityReminderEmail(ctx, {
+        firstName: sample.firstName,
+        availabilityLine: "you are available from 1 September 2026",
+        confirmUrl: sample.portalUrl,
+        portalUrl: sample.portalUrl,
+        unsubscribeUrl: sample.unsubscribeUrl,
+      });
+      break;
+    default:
+      throw badRequest("Unknown template — use invite, followup, welcome or reminder.");
+  }
+  return c.json(rendered);
 });

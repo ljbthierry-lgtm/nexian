@@ -19,7 +19,8 @@ import { runRetentionSweep } from "./modules/admin/retention";
 import { sendEmail } from "./modules/notifications/resend";
 import { availabilityReminderEmail } from "./modules/notifications/templates";
 import { createActionToken } from "./modules/notifications/tokens";
-import { sendOutreachTo } from "./modules/outreach/routes";
+import { sendOutreachTo } from "./modules/outreach/send";
+import { runInviteWave } from "./modules/outreach/wave";
 
 /** Cap per run: a cron that suddenly mails thousands of people is a bug, not a feature. */
 const MAX_FOLLOWUPS_PER_RUN = 100;
@@ -27,7 +28,7 @@ const MAX_REMINDERS_PER_RUN = 200;
 
 interface CandidateRow {
   id: string;
-  email: string;
+  email: string | null;
   first_name: string;
   last_name: string;
   source: string;
@@ -38,7 +39,14 @@ interface CandidateRow {
   has_profile: number;
 }
 
-/** Step 2 of the invite sequence, for prospects whose waiting period has passed. */
+/**
+ * Step 2 of the invite sequence, for prospects whose waiting period has passed.
+ *
+ * Skips anyone sitting in the LinkedIn queue: the touch budget is two in total
+ * across channels, and a recruiter who queued somebody for a LinkedIn message
+ * has claimed the second touch. Sending the email follow-up first would spend
+ * it behind their back.
+ */
 export async function sendDueFollowUps(env: Env, now = new Date()): Promise<number> {
   const waitDays = intVar(env.FOLLOWUP_AFTER_DAYS, 10);
   const maxTouches = intVar(env.MAX_OUTREACH_TOUCHES, 2);
@@ -53,9 +61,11 @@ export async function sendDueFollowUps(env: Env, now = new Date()): Promise<numb
      FROM contacts ct
      WHERE ct.suppressed = 0
        AND ct.anonymized_at IS NULL
+       AND ct.email IS NOT NULL
        AND ct.outreach_count = 1
        AND ct.last_outreach_at IS NOT NULL
        AND ct.last_outreach_at < ?
+       AND ct.linkedin_state != 'queued'
        AND NOT EXISTS (SELECT 1 FROM profiles p WHERE p.contact_id = ct.id)
      ORDER BY ct.last_outreach_at ASC
      LIMIT ?`,
@@ -161,11 +171,19 @@ export async function sendAvailabilityReminders(env: Env, now = new Date()): Pro
 export async function runScheduledJobs(env: Env): Promise<void> {
   const started = Date.now();
   try {
+    const wave = await runInviteWave(env);
     const followUps = await sendDueFollowUps(env);
     const reminders = await sendAvailabilityReminders(env);
     const anonymised = await runRetentionSweep(env);
     await pruneRateLimits(env.DB);
-    log.info("cron.done", { followUps, reminders, anonymised, ms: Date.now() - started });
+    log.info("cron.done", {
+      waveSent: wave.sent,
+      waveRemaining: wave.remaining,
+      followUps,
+      reminders,
+      anonymised,
+      ms: Date.now() - started,
+    });
   } catch (e) {
     log.error("cron.failed", { error: e instanceof Error ? e.message : String(e) });
   }

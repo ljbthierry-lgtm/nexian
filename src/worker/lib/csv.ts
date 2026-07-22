@@ -80,17 +80,22 @@ export function normaliseHeader(raw: string): string | null {
 }
 
 export interface ImportRow {
-  email: string;
+  /** Absent for LinkedIn-only rows — one of email / linkedin_key is always set. */
+  email?: string;
   first_name: string;
   last_name: string;
   phone?: string;
   linkedin_url?: string;
+  /** Normalised profile key when linkedin_url parses — the dedup identity. */
+  linkedin_key?: string;
   source_note?: string;
 }
 
 export interface ImportParseResult {
   rows: ImportRow[];
   skipped: { line: number; reason: string }[];
+  /** Rows that were imported, but with something worth telling the user. */
+  warnings: { line: number; note: string }[];
   /** Header columns we could not map — surfaced so the user can fix the file. */
   unmappedHeaders: string[];
 }
@@ -102,21 +107,35 @@ export function isValidEmail(value: string): boolean {
 }
 
 /**
- * Map a parsed CSV onto import rows. Anything without a usable email is skipped
- * with a reason rather than silently dropped — a half-imported list is worse
- * than a rejected one.
+ * Map a parsed CSV onto import rows.
+ *
+ * A row earns its place with a valid email OR a recognisable LinkedIn profile —
+ * half of a real prospect list has no address. Anything with neither is skipped
+ * with a reason rather than silently dropped, and a row whose email is mangled
+ * but whose LinkedIn parses is imported LinkedIn-only with a warning, because
+ * losing the typo is better than losing the person.
  */
-export function mapImportRows(table: string[][]): ImportParseResult {
+export function mapImportRows(
+  table: string[][],
+  keyOf: (url: string) => string | null = () => null,
+): ImportParseResult {
   const skipped: { line: number; reason: string }[] = [];
-  if (!table.length) return { rows: [], skipped, unmappedHeaders: [] };
+  const warnings: { line: number; note: string }[] = [];
+  if (!table.length) return { rows: [], skipped, warnings, unmappedHeaders: [] };
 
   const header = table[0]!;
   const mapping = header.map(normaliseHeader);
   const unmappedHeaders = header.filter((h, i) => h.trim() !== "" && mapping[i] === null);
-  if (!mapping.includes("email")) {
+  if (!mapping.includes("email") && !mapping.includes("linkedin_url")) {
     return {
       rows: [],
-      skipped: [{ line: 1, reason: "No email column found — add a column headed 'Email'." }],
+      skipped: [
+        {
+          line: 1,
+          reason: "No email or LinkedIn column found — add a column headed 'Email' or 'LinkedIn'.",
+        },
+      ],
+      warnings,
       unmappedHeaders,
     };
   }
@@ -129,30 +148,59 @@ export function mapImportRows(table: string[][]): ImportParseResult {
     mapping.forEach((field, i) => {
       if (field) rec[field] = (cells[i] ?? "").trim();
     });
-    const email = (rec.email ?? "").toLowerCase();
-    if (!email) {
-      skipped.push({ line: r + 1, reason: "Empty email" });
+
+    const rawEmail = (rec.email ?? "").toLowerCase();
+    const email = isValidEmail(rawEmail) ? rawEmail : undefined;
+    const linkedinUrl = rec.linkedin_url || undefined;
+    const linkedinKey = linkedinUrl ? (keyOf(linkedinUrl) ?? undefined) : undefined;
+
+    if (!email && !linkedinKey) {
+      skipped.push({
+        line: r + 1,
+        reason: rawEmail
+          ? `Not a valid email address (${rawEmail}) and no usable LinkedIn URL`
+          : "No email address and no usable LinkedIn URL",
+      });
       continue;
     }
-    if (!isValidEmail(email)) {
-      skipped.push({ line: r + 1, reason: `Not a valid email address: ${email}` });
+    if (rawEmail && !email) {
+      warnings.push({
+        line: r + 1,
+        note: `Email looked invalid (${rawEmail}) — imported with LinkedIn only`,
+      });
+    }
+    if (linkedinUrl && !linkedinKey) {
+      warnings.push({
+        line: r + 1,
+        note: `Could not read the LinkedIn URL (${linkedinUrl.slice(0, 60)}) — kept the email only`,
+      });
+    }
+
+    // One person, one row: dedup on every identity the row carries, so the same
+    // freelancer listed once by email and once by profile does not import twice.
+    const identities = [email, linkedinKey && `li:${linkedinKey}`].filter((v): v is string =>
+      Boolean(v),
+    );
+    if (identities.some((k) => seen.has(k))) {
+      skipped.push({
+        line: r + 1,
+        reason: `Duplicate of an earlier row: ${email ?? linkedinUrl}`,
+      });
       continue;
     }
-    if (seen.has(email)) {
-      skipped.push({ line: r + 1, reason: `Duplicate of an earlier row: ${email}` });
-      continue;
-    }
-    seen.add(email);
+    for (const k of identities) seen.add(k);
+
     rows.push({
       email,
       first_name: rec.first_name ?? "",
       last_name: rec.last_name ?? "",
       phone: rec.phone || undefined,
-      linkedin_url: rec.linkedin_url || undefined,
+      linkedin_url: linkedinUrl,
+      linkedin_key: linkedinKey,
       source_note: rec.source_note || undefined,
     });
   }
-  return { rows, skipped, unmappedHeaders };
+  return { rows, skipped, warnings, unmappedHeaders };
 }
 
 /**

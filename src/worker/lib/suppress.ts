@@ -12,12 +12,11 @@
 import type { Env } from "../env";
 import { logActivity } from "./activity";
 import { MARKETING_PURPOSES, recordConsent } from "./consent";
-import { run } from "./db";
-import { suppressEmail } from "./suppression";
+import { first, run } from "./db";
+import { suppressEmail, suppressLinkedin } from "./suppression";
 
 export interface SuppressOptions {
   contactId: string;
-  email: string;
   reason: string;
   /** Where the decision came from, for the consent ledger. */
   source: "unsubscribe_link" | "admin" | "profile_page";
@@ -25,13 +24,25 @@ export interface SuppressOptions {
 }
 
 /**
- * Mark a contact as never-contact-again: the permanent hashed entry, the row
+ * Mark a contact as never-contact-again: the permanent hashed entries, the row
  * flags, the withdrawal of every marketing consent, and the audit line.
+ *
+ * The identities are read from the row here rather than passed in, so no caller
+ * can suppress the record while forgetting one of the person's identifiers —
+ * an opt-out that misses the LinkedIn key would let a re-import next month
+ * bring the same person straight back.
  */
 export async function suppressContact(env: Env, opts: SuppressOptions): Promise<void> {
-  // The hash first, and before any caller overwrites the address: it is what
-  // makes the opt-out survive deletion and block a re-import months later.
-  await suppressEmail(env.DB, opts.email, opts.reason);
+  const identity = await first<{ email: string | null; linkedin_key: string | null }>(
+    env.DB,
+    `SELECT email, linkedin_key FROM contacts WHERE id = ?`,
+    opts.contactId,
+  );
+
+  // The hashes first, and before anything overwrites the row: they are what
+  // make the opt-out survive deletion and block a re-import months later.
+  if (identity?.email) await suppressEmail(env.DB, identity.email, opts.reason);
+  if (identity?.linkedin_key) await suppressLinkedin(env.DB, identity.linkedin_key, opts.reason);
 
   await run(
     env.DB,

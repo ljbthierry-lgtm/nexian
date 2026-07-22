@@ -29,9 +29,49 @@ interface PortalMe {
   consents: Consents;
 }
 
-/** The freelancer's own page, reached from a magic link. */
-export function Portal() {
-  const [data, setData] = useState<PortalMe | null>(null);
+/**
+ * Sample data for the staff-side preview: what a registered freelancer's page
+ * looks like, without touching any real freelancer's record.
+ */
+const PREVIEW_DATA: PortalMe = {
+  contact: {
+    id: "preview",
+    email: "sofie.vermeulen@example.com",
+    first_name: "Sofie",
+    last_name: "Vermeulen",
+  },
+  profile: {
+    headline: "Senior project manager — pharma & manufacturing",
+    years_experience: 12,
+    skills: ["Project management", "Change management", "Procurement"],
+    industries: ["Pharma & life sciences", "Manufacturing"],
+    languages: ["Dutch", "French", "English"],
+    daily_rate: 750,
+    currency: "EUR",
+    availability: "from_date",
+    available_from: "2026-09-01",
+    location: "Brussels",
+    remote_ok: true,
+    freelancer_note: null,
+    cv_filename: "CV_Sofie_Vermeulen.pdf",
+    cv_size: 245760,
+    cv_uploaded_at: "2026-05-12 09:30:00",
+    registered_at: "2026-05-12 09:24:00",
+    updated_at: "2026-07-01 14:02:00",
+    last_confirmed_at: "2026-07-01 14:02:00",
+  },
+  consents: { data_processing: true, mission_alerts: true, news: false },
+};
+
+/**
+ * The freelancer's own page, reached from a magic link — or, with `preview`,
+ * the staff-side look at that page rendered from sample data. Preview mode
+ * never fetches `/api/portal/me` and every write is disabled at the submit
+ * boundary, so an admin can show the experience around without a session or a
+ * guinea-pig freelancer.
+ */
+export function Portal({ preview = false }: { preview?: boolean }) {
+  const [data, setData] = useState<PortalMe | null>(preview ? PREVIEW_DATA : null);
   const [tax, setTax] = useState<Taxonomy | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
@@ -39,13 +79,14 @@ export function Portal() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
+    if (preview) return;
     try {
       setData(await api.get<PortalMe>("/api/portal/me"));
       setError(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not load your profile");
     }
-  }, []);
+  }, [preview]);
 
   useEffect(() => {
     void load();
@@ -74,6 +115,13 @@ export function Portal() {
   const { contact, profile, consents } = data;
 
   async function patch(body: Record<string, unknown>, message: string) {
+    // The single choke point every profile save goes through, so preview mode
+    // is read-only by construction rather than by remembering to disable
+    // buttons one by one.
+    if (preview) {
+      setFlash("This is a preview — nothing is saved.");
+      return;
+    }
     setBusy(true);
     try {
       await api.patch("/api/portal/profile", body);
@@ -88,6 +136,12 @@ export function Portal() {
 
   return (
     <Shell>
+      {preview && (
+        <Banner kind="info">
+          Preview — this is what a registered freelancer sees. Buttons are disabled and nothing is
+          saved.
+        </Banner>
+      )}
       <div className="eyebrow">Your profile</div>
       <h1>Welcome back, {contact.first_name || contact.email}</h1>
       <p>
@@ -188,7 +242,7 @@ export function Portal() {
         </div>
       )}
 
-      <CvCard profile={profile} onChanged={load} />
+      <CvCard profile={profile} onChanged={load} readOnly={preview} />
 
       <div className="card">
         <h3>Email preferences</h3>
@@ -201,12 +255,14 @@ export function Portal() {
           granted={consents.mission_alerts}
           purpose="mission_alerts"
           onDone={load}
+          readOnly={preview}
         />
         <ConsentToggle
           label="Occasional company news"
           granted={consents.news}
           purpose="news"
           onDone={load}
+          readOnly={preview}
         />
       </div>
 
@@ -217,13 +273,20 @@ export function Portal() {
           immediate and cannot be undone.
         </p>
         <div className="btn-row">
-          <a className="btn ghost" href="/api/portal/export">
+          <a
+            className="btn ghost"
+            href={preview ? undefined : "/api/portal/export"}
+            aria-disabled={preview}
+            onClick={preview ? (e) => e.preventDefault() : undefined}
+          >
             Download my data
           </a>
           <button
             type="button"
             className="btn danger"
+            disabled={preview}
             onClick={async () => {
+              if (preview) return;
               if (
                 !window.confirm(
                   "Delete your profile and CV? This is immediate and cannot be undone. We will not contact you again.",
@@ -258,11 +321,13 @@ function ConsentToggle({
   granted,
   purpose,
   onDone,
+  readOnly = false,
 }: {
   label: string;
   granted: boolean;
   purpose: "mission_alerts" | "news";
   onDone: () => Promise<void>;
+  readOnly?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   return (
@@ -270,8 +335,9 @@ function ConsentToggle({
       <input
         type="checkbox"
         checked={granted}
-        disabled={busy}
+        disabled={busy || readOnly}
         onChange={async (e) => {
+          if (readOnly) return;
           setBusy(true);
           try {
             await api.post("/api/portal/consent", { purpose, granted: e.target.checked });
@@ -289,9 +355,11 @@ function ConsentToggle({
 function CvCard({
   profile,
   onChanged,
+  readOnly = false,
 }: {
   profile: PortalProfile;
   onChanged: () => Promise<void>;
+  readOnly?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -310,20 +378,25 @@ function CvCard({
       )}
       <div className="btn-row">
         {profile.cv_filename && (
-          <a className="btn ghost sm" href="/api/portal/cv">
+          <a
+            className="btn ghost sm"
+            href={readOnly ? undefined : "/api/portal/cv"}
+            aria-disabled={readOnly}
+            onClick={readOnly ? (e) => e.preventDefault() : undefined}
+          >
             Download
           </a>
         )}
-        <label className="btn ghost sm" style={{ cursor: "pointer" }}>
+        <label className="btn ghost sm" style={{ cursor: readOnly ? "default" : "pointer" }}>
           {profile.cv_filename ? "Replace" : "Upload"}
           <input
             type="file"
             accept=".pdf,.doc,.docx,application/pdf"
             style={{ display: "none" }}
-            disabled={busy}
+            disabled={busy || readOnly}
             onChange={async (e) => {
               const file = e.target.files?.[0];
-              if (!file) return;
+              if (!file || readOnly) return;
               setBusy(true);
               setError(null);
               try {
@@ -341,8 +414,9 @@ function CvCard({
           <button
             type="button"
             className="btn plain sm"
-            disabled={busy}
+            disabled={busy || readOnly}
             onClick={async () => {
+              if (readOnly) return;
               await api.del("/api/portal/cv");
               await onChanged();
             }}

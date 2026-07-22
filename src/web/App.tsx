@@ -2,20 +2,26 @@ import { useCallback, useEffect, useState } from "react";
 import { ApiError, type Me, api } from "./api";
 import { Campaigns } from "./pages/Campaigns";
 import { Contacts } from "./pages/Contacts";
+import { Invitations } from "./pages/Invitations";
 import { Join } from "./pages/Join";
 import { Login } from "./pages/Login";
 import { Pool } from "./pages/Pool";
 import { Portal } from "./pages/Portal";
+import { Preview } from "./pages/Preview";
 import { Privacy } from "./pages/Privacy";
 import { SetPassword } from "./pages/SetPassword";
 import { Settings } from "./pages/Settings";
 
-type StaffPage = "contacts" | "pool" | "campaigns" | "settings";
+type StaffPage = "invitations" | "contacts" | "pool" | "campaigns" | "preview" | "settings";
 
-const NAV: { key: StaffPage; label: string; icon: string; group: string }[] = [
+const NAV: { key: StaffPage; label: string; icon: string; group: string; adminOnly?: boolean }[] = [
+  { key: "invitations", label: "Invitations", icon: "➤", group: "Talent" },
   { key: "contacts", label: "Contacts & outreach", icon: "◧", group: "Talent" },
   { key: "pool", label: "Talent pool", icon: "▦", group: "Talent" },
   { key: "campaigns", label: "Campaigns", icon: "✉", group: "Talent" },
+  // Email previews render through an admin endpoint, so showing the entry to a
+  // recruiter would only lead to a dead screen.
+  { key: "preview", label: "Freelancer view", icon: "👁", group: "Admin", adminOnly: true },
   { key: "settings", label: "Settings", icon: "⚙", group: "Admin" },
 ];
 
@@ -63,8 +69,9 @@ export function App() {
   if (!checked) return <div className="spinner">Loading…</div>;
   if (!me) return <Login onSignedIn={loadMe} />;
 
+  const visibleNav = NAV.filter((n) => !n.adminOnly || me.role === "admin");
   const current = NAV.find((n) => n.key === page)!;
-  const groups = [...new Set(NAV.map((n) => n.group))];
+  const groups = [...new Set(visibleNav.map((n) => n.group))];
 
   return (
     <div className="shell">
@@ -76,19 +83,21 @@ export function App() {
           <div key={group}>
             <div className="navlbl">{group}</div>
             <nav className="nav">
-              {NAV.filter((n) => n.group === group).map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  aria-current={page === item.key ? "page" : undefined}
-                  onClick={() => setPage(item.key)}
-                >
-                  <span className="ic" aria-hidden="true">
-                    {item.icon}
-                  </span>
-                  {item.label}
-                </button>
-              ))}
+              {visibleNav
+                .filter((n) => n.group === group)
+                .map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    aria-current={page === item.key ? "page" : undefined}
+                    onClick={() => setPage(item.key)}
+                  >
+                    <span className="ic" aria-hidden="true">
+                      {item.icon}
+                    </span>
+                    {item.label}
+                  </button>
+                ))}
             </nav>
           </div>
         ))}
@@ -124,9 +133,11 @@ export function App() {
         </div>
 
         <div className="content">
+          {page === "invitations" && <Invitations />}
           {page === "contacts" && <Contacts />}
           {page === "pool" && <Pool />}
           {page === "campaigns" && <Campaigns />}
+          {page === "preview" && <Preview />}
           {page === "settings" && <Settings me={me} />}
         </div>
       </div>

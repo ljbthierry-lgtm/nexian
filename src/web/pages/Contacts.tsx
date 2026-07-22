@@ -350,7 +350,7 @@ function ContactDetail({
   }
 
   const ct = data.contact;
-  const name = `${ct.first_name} ${ct.last_name}`.trim() || ct.email;
+  const name = `${ct.first_name} ${ct.last_name}`.trim() || ct.email || "LinkedIn-only contact";
 
   return (
     <Modal title={name} onClose={onClose}>
@@ -556,7 +556,7 @@ function WhoAccessed({ contactId }: { contactId: string }) {
 
 /* ------------------------------------------------------------------ modals */
 
-function LinkedInModal({
+export function LinkedInModal({
   id,
   onClose,
   onChanged,
@@ -653,7 +653,7 @@ function LinkedInModal({
   );
 }
 
-function ImportModal({
+export function ImportModal({
   onClose,
   onDone,
 }: {
@@ -669,9 +669,10 @@ function ImportModal({
   return (
     <Modal title="Import contacts" onClose={onClose}>
       <p style={{ fontSize: 13.5 }}>
-        Paste a CSV or choose a file. It needs an <strong>Email</strong> column; First name, Last
-        name, Phone and LinkedIn are picked up when present. Everyone lands as an opted-out
-        prospect.
+        Paste a CSV or choose a file. Each row needs an <strong>Email</strong> or a{" "}
+        <strong>LinkedIn</strong> URL — people with only a LinkedIn profile are imported too and
+        reached through the LinkedIn queue. First name, Last name and Phone are picked up when
+        present. Everyone lands as an opted-out prospect.
       </p>
       {error && <Banner kind="error">{error}</Banner>}
 

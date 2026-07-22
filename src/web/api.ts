@@ -82,13 +82,28 @@ export interface Consents {
   news: boolean;
 }
 
+export interface InviteStatus {
+  key:
+    | "registered"
+    | "declined"
+    | "invited_2"
+    | "invited_1"
+    | "queued_linkedin"
+    | "not_invited"
+    | "no_channel";
+  label: string;
+  tone: "good" | "warn" | "neutral" | "bad";
+}
+
 export interface Contact {
   id: string;
-  email: string;
+  /** Null for LinkedIn-only prospects. */
+  email: string | null;
   first_name: string;
   last_name: string;
   phone: string | null;
   linkedin_url: string | null;
+  linkedin_key: string | null;
   source: string;
   source_note: string | null;
   stage: Stage;
@@ -100,6 +115,7 @@ export interface Contact {
   has_profile: boolean;
   created_at: string;
   consents?: Consents;
+  invite_status: InviteStatus;
 }
 
 export interface PoolMember {

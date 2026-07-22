@@ -207,14 +207,8 @@ actionRoutes.post("/:token", async (c) => {
       if (!row.contact_id) return c.html(expiredPage("This link is not linked to a profile."), 410);
       const scope = readScope(row.payload);
       if (scope === "all") {
-        const target = await first<Named>(
-          c.env.DB,
-          `SELECT first_name, email FROM contacts WHERE id = ?`,
-          row.contact_id,
-        );
         await suppressContact(c.env, {
           contactId: row.contact_id,
-          email: target?.email ?? "",
           reason: "Opted out from an email",
           source: "unsubscribe_link",
         });

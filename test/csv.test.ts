@@ -88,10 +88,12 @@ describe("import mapping", () => {
     ]);
   });
 
-  it("refuses a file with no email column and says why", () => {
+  it("refuses a file with neither an email nor a LinkedIn column, and says why", () => {
+    // Was "no email column" until LinkedIn-only contacts arrived; either
+    // identity column now qualifies a file, so only a file with neither fails.
     const res = mapImportRows(parseCsv("Name,Company\nJane,Acme"));
     expect(res.rows).toHaveLength(0);
-    expect(res.skipped[0]?.reason).toContain("No email column");
+    expect(res.skipped[0]?.reason).toContain("No email or LinkedIn column");
   });
 
   it("skips invalid addresses with a reason instead of importing junk", () => {

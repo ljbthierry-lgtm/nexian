@@ -15,6 +15,7 @@ import { resolveBaseUrl } from "../../lib/baseUrl";
 import { all, first, run, uid } from "../../lib/db";
 import { ALLOWED_CV_TYPES, MAX_CV_BYTES, isAcceptableCv, putCv } from "../../lib/cvStore";
 import { serialiseLabels } from "../../lib/labels";
+import { linkedinKey } from "../../lib/linkedinKey";
 import { badRequest, tooManyRequests } from "../../lib/errors";
 import { log } from "../../lib/log";
 import { RATE_LIMITS, clientIp, hitRateLimit } from "../../lib/rateLimit";
@@ -137,11 +138,27 @@ publicRoutes.post("/register", async (c) => {
   }
 
   const email = input.email.trim().toLowerCase();
-  const existing = await first<{ id: string; suppressed: number }>(
+  const liKey = linkedinKey(input.linkedin_url);
+  let existing = await first<{ id: string; suppressed: number }>(
     c.env.DB,
     `SELECT id, suppressed FROM contacts WHERE email = ?`,
     email,
   );
+  // No match by email: a prospect imported from LinkedIn has no address yet, so
+  // their own registration arrives looking brand new. If the LinkedIn URL they
+  // typed matches an email-LESS prospect, adopt that record instead of creating
+  // a twin. The guard matters: a record that already has an email is never
+  // adopted, so nobody can attach themselves to someone else's identity by
+  // pasting their profile URL — the worst a false claim can reach is a record
+  // holding nothing but that same public URL.
+  if (!existing && liKey) {
+    existing = await first<{ id: string; suppressed: number }>(
+      c.env.DB,
+      `SELECT id, suppressed FROM contacts
+       WHERE linkedin_key = ? AND email IS NULL AND anonymized_at IS NULL`,
+      liKey,
+    );
+  }
   const hadProfile = existing
     ? Boolean(
         await first<{ contact_id: string }>(
@@ -193,28 +210,32 @@ publicRoutes.post("/register", async (c) => {
     await run(
       c.env.DB,
       `UPDATE contacts
-         SET first_name = ?, last_name = ?, phone = COALESCE(?, phone),
+         SET email = ?, first_name = ?, last_name = ?, phone = COALESCE(?, phone),
              linkedin_url = COALESCE(?, linkedin_url),
+             linkedin_key = COALESCE(?, linkedin_key),
              stage = CASE WHEN stage IN ('prospect', 'contacted') THEN 'registered' ELSE stage END,
              updated_at = datetime('now')
        WHERE id = ?`,
+      email,
       input.first_name,
       input.last_name,
       input.phone ?? null,
       input.linkedin_url ?? null,
+      liKey,
       contactId,
     );
   } else {
     await run(
       c.env.DB,
-      `INSERT INTO contacts (id, email, first_name, last_name, phone, linkedin_url, source, stage)
-       VALUES (?, ?, ?, ?, ?, ?, 'self_signup', 'registered')`,
+      `INSERT INTO contacts (id, email, first_name, last_name, phone, linkedin_url, linkedin_key, source, stage)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'self_signup', 'registered')`,
       contactId,
       email,
       input.first_name,
       input.last_name,
       input.phone ?? null,
       input.linkedin_url ?? null,
+      liKey,
     );
   }
 

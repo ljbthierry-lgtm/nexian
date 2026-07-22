@@ -17,13 +17,35 @@ export async function emailHash(email: string): Promise<string> {
   return sha256Hex(normaliseEmail(email));
 }
 
+/**
+ * A LinkedIn identity is suppressed under a prefixed hash in the same table.
+ * The prefix keeps the two namespaces apart: an email that happened to equal a
+ * LinkedIn key must never satisfy the other's lookup.
+ */
+export async function linkedinHash(linkedinKey: string): Promise<string> {
+  return sha256Hex(`li:${linkedinKey}`);
+}
+
 export async function suppressEmail(db: D1Database, email: string, reason: string): Promise<void> {
   if (!email || email.includes("@invalid")) return;
+  await storeHash(db, await emailHash(email), reason);
+}
+
+export async function suppressLinkedin(
+  db: D1Database,
+  linkedinKey: string,
+  reason: string,
+): Promise<void> {
+  if (!linkedinKey) return;
+  await storeHash(db, await linkedinHash(linkedinKey), reason);
+}
+
+async function storeHash(db: D1Database, hash: string, reason: string): Promise<void> {
   await run(
     db,
     `INSERT INTO suppression_list (email_hash, reason) VALUES (?, ?)
      ON CONFLICT(email_hash) DO NOTHING`,
-    await emailHash(email),
+    hash,
     reason.slice(0, 200),
   );
 }
@@ -46,15 +68,17 @@ export async function isSuppressed(db: D1Database, email: string): Promise<boole
   return row !== null;
 }
 
-/** Bulk check for imports — returns the subset of addresses that must be skipped. */
-export async function filterSuppressed(db: D1Database, emails: string[]): Promise<Set<string>> {
+/**
+ * Bulk check for imports: which of these identities has ever opted out, by
+ * email, by LinkedIn key, or both. Returns the matched hashes; callers map
+ * them back to rows. Chunked because D1 caps bound parameters and an import
+ * can be thousands of rows.
+ */
+export async function filterSuppressedHashes(
+  db: D1Database,
+  hashes: string[],
+): Promise<Set<string>> {
   const blocked = new Set<string>();
-  if (!emails.length) return blocked;
-  const byHash = new Map<string, string>();
-  for (const email of emails) byHash.set(await emailHash(email), normaliseEmail(email));
-
-  const hashes = [...byHash.keys()];
-  // Chunked: D1 has a bound-parameter ceiling and an import can be thousands of rows.
   for (let i = 0; i < hashes.length; i += 200) {
     const slice = hashes.slice(i, i + 200);
     const rows = await all<{ email_hash: string }>(
@@ -62,10 +86,20 @@ export async function filterSuppressed(db: D1Database, emails: string[]): Promis
       `SELECT email_hash FROM suppression_list WHERE email_hash IN (${slice.map(() => "?").join(", ")})`,
       ...slice,
     );
-    for (const row of rows) {
-      const email = byHash.get(row.email_hash);
-      if (email) blocked.add(email);
-    }
+    for (const row of rows) blocked.add(row.email_hash);
+  }
+  return blocked;
+}
+
+/** Convenience wrapper for the email-only callers that predate LinkedIn support. */
+export async function filterSuppressed(db: D1Database, emails: string[]): Promise<Set<string>> {
+  const byHash = new Map<string, string>();
+  for (const email of emails) byHash.set(await emailHash(email), normaliseEmail(email));
+  const matched = await filterSuppressedHashes(db, [...byHash.keys()]);
+  const blocked = new Set<string>();
+  for (const hash of matched) {
+    const email = byHash.get(hash);
+    if (email) blocked.add(email);
   }
   return blocked;
 }
