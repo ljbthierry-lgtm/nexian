@@ -13,6 +13,7 @@ import { logActivity } from "./lib/activity";
 import { availabilitySentence } from "./lib/availability";
 import { resolveBaseUrl } from "./lib/baseUrl";
 import { all, run } from "./lib/db";
+import { EMAILABLE_SQL } from "./lib/deliverability";
 import { log } from "./lib/log";
 import { pruneRateLimits } from "./lib/rateLimit";
 import { runRetentionSweep } from "./modules/admin/retention";
@@ -37,6 +38,8 @@ interface CandidateRow {
   outreach_count: number;
   last_outreach_at: string | null;
   has_profile: number;
+  email_status: string | null;
+  replied_at: string | null;
 }
 
 /**
@@ -57,11 +60,13 @@ export async function sendDueFollowUps(env: Env, now = new Date()): Promise<numb
     env.DB,
     `SELECT ct.id, ct.email, ct.first_name, ct.last_name, ct.source, ct.suppressed,
             ct.anonymized_at, ct.outreach_count, ct.last_outreach_at,
+            ct.email_status, ct.replied_at,
             (SELECT COUNT(*) FROM profiles p WHERE p.contact_id = ct.id) AS has_profile
      FROM contacts ct
      WHERE ct.suppressed = 0
        AND ct.anonymized_at IS NULL
-       AND ct.email IS NOT NULL
+       AND ${EMAILABLE_SQL}
+       AND ct.replied_at IS NULL
        AND ct.outreach_count = 1
        AND ct.last_outreach_at IS NOT NULL
        AND ct.last_outreach_at < ?
@@ -109,6 +114,7 @@ export async function sendAvailabilityReminders(env: Env, now = new Date()): Pro
        ON cc.contact_id = ct.id AND cc.purpose = 'mission_alerts' AND cc.granted = 1
      WHERE ct.suppressed = 0
        AND ct.anonymized_at IS NULL
+       AND ${EMAILABLE_SQL}
        AND COALESCE(p.last_confirmed_at, p.updated_at) < ?
        AND (p.last_reminded_at IS NULL OR p.last_reminded_at < ?)
      ORDER BY COALESCE(p.last_confirmed_at, p.updated_at) ASC

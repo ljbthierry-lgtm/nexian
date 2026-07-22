@@ -16,11 +16,19 @@ export interface InviteStatusInput {
   anonymized: boolean;
   outreachCount: number;
   linkedinState: "none" | "queued" | "sent";
+  /** They answered, however the answer reached us. */
+  replied?: boolean;
+  /** What they said, when we know. */
+  replyOutcome?: "interested" | "not_now" | "not_interested" | null;
+  /** Address bounced permanently, or they pressed "spam". */
+  emailUndeliverable?: boolean;
 }
 
 export type InviteStatusKey =
   | "registered"
   | "declined"
+  | "replied"
+  | "undeliverable"
   | "invited_2"
   | "invited_1"
   | "queued_linkedin"
@@ -42,6 +50,27 @@ export function deriveInviteStatus(input: InviteStatusInput): InviteStatus {
   }
   if (input.suppressed || input.anonymized) {
     return { key: "declined", label: "Declined / do not contact", tone: "bad" };
+  }
+  // An answer outranks the touch count: "invited twice, awaiting reply" would be
+  // untrue and would invite a recruiter to chase somebody who already answered.
+  if (input.replied) {
+    const label =
+      input.replyOutcome === "interested"
+        ? "Replied — interested"
+        : input.replyOutcome === "not_now"
+          ? "Replied — not right now"
+          : input.replyOutcome === "not_interested"
+            ? "Replied — not interested"
+            : "Replied";
+    return {
+      key: "replied",
+      label,
+      tone: input.replyOutcome === "interested" ? "good" : "neutral",
+    };
+  }
+  // A dead address is not "awaiting reply" either — nothing ever arrived.
+  if (input.emailUndeliverable && !input.hasLinkedin) {
+    return { key: "undeliverable", label: "Email undeliverable", tone: "bad" };
   }
   if (input.outreachCount >= 2) {
     return { key: "invited_2", label: "Invited 2× — awaiting reply", tone: "warn" };

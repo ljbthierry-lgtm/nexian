@@ -15,6 +15,10 @@ export interface OutreachCandidate {
   hasProfile: boolean;
   outreachCount: number;
   lastOutreachAt: string | null;
+  /** Set once they answer, however the answer reached us. */
+  replied?: boolean;
+  /** The address bounced permanently or the person pressed "spam". */
+  emailUndeliverable?: boolean;
 }
 
 export interface OutreachPolicy {
@@ -35,6 +39,12 @@ export function decideOutreach(
   if (candidate.suppressed) return { allowed: false, reason: "Marked do-not-contact" };
   if (candidate.anonymized) return { allowed: false, reason: "Record has been anonymised" };
   if (candidate.hasProfile) return { allowed: false, reason: "Already registered in the pool" };
+  // Someone who answered has been served by the sequence, whatever they said.
+  // Chasing a person who already replied is the rudest thing this app could do.
+  if (candidate.replied) return { allowed: false, reason: "They have already replied" };
+  if (candidate.emailUndeliverable) {
+    return { allowed: false, reason: "Email address is undeliverable" };
+  }
   if (candidate.outreachCount >= policy.maxTouches) {
     return {
       allowed: false,

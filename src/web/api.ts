@@ -116,6 +116,10 @@ export interface Contact {
   created_at: string;
   consents?: Consents;
   invite_status: InviteStatus;
+  /** 'unknown' | 'delivered' | 'bounced' | 'complained' */
+  email_status: string;
+  replied_at: string | null;
+  reply_outcome: string | null;
 }
 
 export interface PoolMember {

@@ -213,6 +213,32 @@ export function signInCodeEmail(
   };
 }
 
+/**
+ * A security alert to administrators.
+ *
+ * Deliberately plain and free of buttons: the recipient should go and look at
+ * the access log themselves rather than act on a link in an email, which is the
+ * exact habit that makes phishing work.
+ */
+export function alertEmail(
+  ctx: TemplateContext,
+  o: { summary: string; detail: string; severity: string; when: string },
+): RenderedEmail {
+  const body = `
+    <p style="font-size:13px;color:#8a8194;margin:0 0 6px;text-transform:uppercase;
+       letter-spacing:.08em">${esc(o.severity)}</p>
+    <p style="font-size:17px;font-weight:700;margin:0 0 12px">${esc(o.summary)}</p>
+    <p>${esc(o.detail)}</p>
+    <p style="font-size:13px;color:#8a8194">Recorded ${esc(o.when)}. Open the talent pool and go to
+       Settings → Access log to see the full record, including who else has downloaded what.</p>
+    <p style="font-size:13px;color:#8a8194">If this was expected, no action is needed — the alert
+       stays in the log either way.</p>`;
+  return {
+    subject: `${ctx.companyName} talent pool — ${o.summary}`,
+    html: emailShell({ body, companyName: ctx.companyName, baseUrl: ctx.baseUrl }),
+  };
+}
+
 /** Staff invitation / password reset. */
 export function setPasswordEmail(
   ctx: TemplateContext,

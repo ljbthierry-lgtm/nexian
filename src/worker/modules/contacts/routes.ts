@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppContext, Stage } from "../../env";
 import { recordAccess } from "../../lib/accessLog";
+import { alertOnExport } from "../admin/exportAlert";
 import { logActivity } from "../../lib/activity";
 import { consentHistory, consentsFor, currentConsents } from "../../lib/consent";
 import { mapImportRows, parseCsv, toCsv } from "../../lib/csv";
@@ -46,6 +47,9 @@ interface ContactRow {
   anonymized_at: string | null;
   created_at: string;
   has_profile: number;
+  email_status: string;
+  replied_at: string | null;
+  reply_outcome: string | null;
 }
 
 /** List with the filters the Contacts screen offers. */
@@ -80,6 +84,7 @@ contactRoutes.get("/", async (c) => {
     `SELECT ct.id, ct.email, ct.linkedin_key, ct.first_name, ct.last_name, ct.phone, ct.linkedin_url, ct.source,
             ct.source_note, ct.stage, ct.suppressed, ct.suppressed_reason, ct.outreach_count,
             ct.last_outreach_at, ct.linkedin_state, ct.anonymized_at, ct.created_at,
+            ct.email_status, ct.replied_at, ct.reply_outcome,
             (SELECT COUNT(*) FROM profiles p WHERE p.contact_id = ct.id) AS has_profile
      FROM contacts ct
      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
@@ -116,6 +121,9 @@ contactRoutes.get("/", async (c) => {
         anonymized: r.anonymized_at !== null,
         outreachCount: r.outreach_count,
         linkedinState: r.linkedin_state as "none" | "queued" | "sent",
+        replied: r.replied_at !== null,
+        replyOutcome: r.reply_outcome as "interested" | null,
+        emailUndeliverable: r.email_status === "bounced" || r.email_status === "complained",
       }),
     })),
   });
@@ -559,10 +567,71 @@ contactRoutes.get("/export/csv", async (c) => {
     detail: `${rows.length} contacts`,
     ip: clientIp(c.req.raw.headers),
   });
+  await alertOnExport(c.env, {
+    userId: user.id,
+    userName: user.name,
+    action: "contacts_export",
+    rowCount: rows.length,
+  });
   return new Response(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": `attachment; filename="nexian-contacts.csv"`,
     },
   });
+});
+
+/**
+ * Record that someone answered, and what they said.
+ *
+ * The outcome is what a recruiter learns from; `replied_at` is what stops the
+ * sequence. They are separate columns because the second must hold even when
+ * the first is "we don't know yet" — an answer ends the chasing regardless of
+ * its content.
+ *
+ * "Not interested" additionally suppresses: someone who took the trouble to say
+ * no should not be on next quarter's list either.
+ */
+contactRoutes.post("/:id/reply", async (c) => {
+  const id = c.req.param("id");
+  const { outcome } = z
+    .object({ outcome: z.enum(["interested", "not_now", "not_interested"]) })
+    .parse(await c.req.json());
+
+  const target = await first<{ id: string }>(c.env.DB, `SELECT id FROM contacts WHERE id = ?`, id);
+  if (!target) throw notFound("No such contact");
+
+  await run(
+    c.env.DB,
+    `UPDATE contacts
+       SET replied_at = COALESCE(replied_at, datetime('now')), reply_outcome = ?,
+           updated_at = datetime('now')
+     WHERE id = ?`,
+    outcome,
+    id,
+  );
+
+  const label = {
+    interested: "Replied — interested",
+    not_now: "Replied — not right now",
+    not_interested: "Replied — not interested",
+  }[outcome];
+
+  await logActivity(c.env.DB, {
+    contactId: id,
+    kind: "note",
+    channel: "email",
+    summary: `${label}. No further invitations will be sent.`,
+    actorUserId: c.get("user").id,
+  });
+
+  if (outcome === "not_interested") {
+    await suppressContact(c.env, {
+      contactId: id,
+      reason: "Replied that they are not interested",
+      source: "admin",
+      actorUserId: c.get("user").id,
+    });
+  }
+  return c.json({ ok: true });
 });

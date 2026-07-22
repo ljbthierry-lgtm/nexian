@@ -9,6 +9,7 @@
 import { type Env, intVar } from "../../env";
 import { logActivity } from "../../lib/activity";
 import { resolveBaseUrl } from "../../lib/baseUrl";
+import { isEmailable } from "../../lib/deliverability";
 import { run } from "../../lib/db";
 import { sendEmail } from "../notifications/resend";
 import { followUpEmail, inviteEmail } from "../notifications/templates";
@@ -33,11 +34,14 @@ export interface OutreachCandidateRow {
   outreach_count: number;
   last_outreach_at: string | null;
   has_profile: number;
+  email_status?: string | null;
+  replied_at?: string | null;
 }
 
 export const CANDIDATE_SELECT = `
   SELECT ct.id, ct.email, ct.first_name, ct.last_name, ct.source, ct.suppressed,
          ct.anonymized_at, ct.outreach_count, ct.last_outreach_at,
+         ct.email_status, ct.replied_at,
          (SELECT COUNT(*) FROM profiles p WHERE p.contact_id = ct.id) AS has_profile
   FROM contacts ct`;
 
@@ -48,6 +52,8 @@ export function toCandidate(row: OutreachCandidateRow): OutreachCandidate {
     hasProfile: row.has_profile > 0,
     outreachCount: row.outreach_count,
     lastOutreachAt: row.last_outreach_at,
+    replied: row.replied_at != null,
+    emailUndeliverable: !isEmailable({ email: row.email, email_status: row.email_status }),
   };
 }
 

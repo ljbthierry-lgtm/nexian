@@ -2,6 +2,7 @@
 import { Hono } from "hono";
 import type { AppContext } from "../../env";
 import { recordAccess } from "../../lib/accessLog";
+import { alertOnExport } from "../admin/exportAlert";
 import { consentsFor } from "../../lib/consent";
 import { toCsv } from "../../lib/csv";
 import { all, first } from "../../lib/db";
@@ -187,6 +188,12 @@ poolRoutes.get("/export/csv", async (c) => {
     action: "pool_export",
     detail: `${rows.length} freelancers`,
     ip: clientIp(c.req.raw.headers),
+  });
+  await alertOnExport(c.env, {
+    userId: user.id,
+    userName: user.name,
+    action: "pool_export",
+    rowCount: rows.length,
   });
   return new Response(csv, {
     headers: {

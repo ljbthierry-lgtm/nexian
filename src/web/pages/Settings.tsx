@@ -507,6 +507,66 @@ const ACCESS_FILTERS = [
   { value: "access_log_export", label: "Exports of this log" },
 ];
 
+interface AlertRow {
+  id: string;
+  kind: string;
+  severity: "info" | "warning" | "critical";
+  summary: string;
+  detail: string | null;
+  user_name: string;
+  emailed: number;
+  acknowledged_at: string | null;
+  created_at: string;
+}
+
+/**
+ * Open alerts, above the log itself.
+ *
+ * Shown here rather than only emailed because email is the thing most likely to
+ * be unconfigured or broken exactly when something worth alerting about happens.
+ */
+function OpenAlerts() {
+  const [alerts, setAlerts] = useState<AlertRow[]>([]);
+
+  const load = useCallback(async () => {
+    const res = await api.get<{ alerts: AlertRow[] }>("/api/admin/alerts");
+    setAlerts(res.alerts);
+  }, []);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const open = alerts.filter((a) => !a.acknowledged_at);
+  if (!open.length) return null;
+
+  return (
+    <>
+      {open.map((a) => (
+        <Banner key={a.id} kind={a.severity === "critical" ? "error" : "warn"}>
+          <strong>{a.summary}</strong>
+          {a.detail && <div style={{ marginTop: 4 }}>{a.detail}</div>}
+          <div style={{ marginTop: 8, display: "flex", gap: 10, alignItems: "center" }}>
+            <span className="sub">
+              {formatDate(a.created_at)}
+              {a.emailed ? " · emailed to admins" : " · not emailed (email not configured)"}
+            </span>
+            <button
+              type="button"
+              className="btn plain sm"
+              onClick={async () => {
+                await api.post(`/api/admin/alerts/${a.id}/acknowledge`);
+                await load();
+              }}
+            >
+              Acknowledge
+            </button>
+          </div>
+        </Banner>
+      ))}
+    </>
+  );
+}
+
 function AccessLog() {
   const [data, setData] = useState<AccessLogData | null>(null);
   const [filters, setFilters] = useState({ userId: "", action: "", from: "", to: "" });
@@ -521,6 +581,7 @@ function AccessLog() {
 
   return (
     <>
+      <OpenAlerts />
       <div className="stats">
         <Stat value={data.last30Days.cvDownloads} label="CVs downloaded (30 days)" />
         <Stat value={data.last30Days.bulkExports} label="Bulk exports (30 days)" tone="amber" />

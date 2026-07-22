@@ -15,6 +15,7 @@
  */
 import type { Env } from "../../env";
 import { all, first, run } from "../../lib/db";
+import { EMAILABLE_SQL } from "../../lib/deliverability";
 import { log } from "../../lib/log";
 import { type OutreachCandidateRow, sendOutreachTo } from "./send";
 
@@ -84,11 +85,13 @@ export function clampLimit(value: unknown): number {
 const WAVE_SELECT = `
   SELECT ct.id, ct.email, ct.first_name, ct.last_name, ct.source, ct.suppressed,
          ct.anonymized_at, ct.outreach_count, ct.last_outreach_at,
+         ct.email_status, ct.replied_at,
          (SELECT COUNT(*) FROM profiles p WHERE p.contact_id = ct.id) AS has_profile
   FROM contacts ct
   WHERE ct.suppressed = 0
     AND ct.anonymized_at IS NULL
-    AND ct.email IS NOT NULL
+    AND ${EMAILABLE_SQL}
+    AND ct.replied_at IS NULL
     AND ct.outreach_count = 0
     AND NOT EXISTS (SELECT 1 FROM profiles p WHERE p.contact_id = ct.id)
   ORDER BY ct.created_at ASC`;

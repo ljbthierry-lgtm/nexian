@@ -44,6 +44,8 @@ const STATUS_FILTERS = [
   { value: "invited_1", label: "Invited — awaiting reply" },
   { value: "invited_2", label: "Invited 2× — awaiting reply" },
   { value: "queued_linkedin", label: "In the LinkedIn queue" },
+  { value: "replied", label: "Replied" },
+  { value: "undeliverable", label: "Email undeliverable" },
   { value: "registered", label: "Registered" },
   { value: "declined", label: "Declined / do not contact" },
 ];
@@ -96,6 +98,18 @@ export function Invitations() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function recordReply(id: string, outcome: "interested" | "not_now" | "not_interested") {
+    await api.post(`/api/contacts/${id}/reply`, { outcome });
+    setFlash({
+      kind: "ok",
+      text:
+        outcome === "not_interested"
+          ? "Recorded — they will not be contacted again."
+          : "Recorded — the invitation sequence stops here for them.",
+    });
+    await load();
   }
 
   async function markDeclined(id: string, name: string) {
@@ -302,21 +316,49 @@ export function Invitations() {
                     <span className={`pill ${ct.invite_status.tone}`}>
                       {ct.invite_status.label}
                     </span>
+                    {ct.email_status === "bounced" && (
+                      <div className="sub">Address undeliverable — no more email</div>
+                    )}
+                    {ct.reply_outcome && (
+                      <div className="sub">{ct.reply_outcome.replace(/_/g, " ")}</div>
+                    )}
                   </td>
                   <td className="sub">
                     {ct.last_outreach_at ? formatDate(ct.last_outreach_at) : "—"}
                   </td>
                   <td>
                     {!ct.has_profile && !ct.suppressed && (
-                      <button
-                        type="button"
-                        className="btn plain sm"
-                        onClick={() =>
-                          void markDeclined(ct.id, `${ct.first_name} ${ct.last_name}`.trim())
-                        }
-                      >
-                        Mark declined
-                      </button>
+                      <div className="btn-row">
+                        {/* Recording a reply is the common case after a wave:
+                            it stops the follow-up, which is the courteous and
+                            the legally safer thing to do. */}
+                        {!ct.replied_at && ct.outreach_count > 0 && (
+                          <select
+                            defaultValue=""
+                            aria-label={`Record a reply from ${ct.first_name} ${ct.last_name}`}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              e.target.value = "";
+                              if (v) void recordReply(ct.id, v as "interested");
+                            }}
+                            style={{ width: "auto" }}
+                          >
+                            <option value="">Record reply…</option>
+                            <option value="interested">Interested</option>
+                            <option value="not_now">Not right now</option>
+                            <option value="not_interested">Not interested</option>
+                          </select>
+                        )}
+                        <button
+                          type="button"
+                          className="btn plain sm"
+                          onClick={() =>
+                            void markDeclined(ct.id, `${ct.first_name} ${ct.last_name}`.trim())
+                          }
+                        >
+                          Mark declined
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>

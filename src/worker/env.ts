@@ -13,6 +13,8 @@ export interface Env {
   PROSPECT_RETENTION_DAYS: string;
   // secrets
   RESEND_API_KEY?: string;
+  /** Signing secret for Resend's delivery webhooks (`whsec_…`). */
+  RESEND_WEBHOOK_SECRET?: string;
   SETUP_KEY?: string;
 }
 

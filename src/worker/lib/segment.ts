@@ -7,6 +7,7 @@
  * mail, so "Campaign to this segment" can never quietly mean something else.
  */
 import type { CampaignPurpose, Stage } from "../env";
+import { EMAILABLE_SQL } from "./deliverability";
 
 export interface Segment {
   /** Match any of these skill labels. */
@@ -147,6 +148,7 @@ export function buildAudienceQuery(
     JOIN consent_current cc
       ON cc.contact_id = ct.id AND cc.purpose = ? AND cc.granted = 1
     ${whereClause(frag)}
+    ${frag.where.length ? "AND" : "WHERE"} ${EMAILABLE_SQL}
     ORDER BY ct.last_name, ct.first_name
   `;
   return { sql, params: [purpose, ...frag.params] };

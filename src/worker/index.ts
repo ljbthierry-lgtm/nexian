@@ -12,8 +12,10 @@ import { adminRoutes } from "./modules/admin/routes";
 import { authRoutes } from "./modules/auth/routes";
 import { campaignRoutes } from "./modules/campaigns/routes";
 import { contactRoutes } from "./modules/contacts/routes";
+import { handleInboundEmail } from "./modules/inbound/email";
 import { outreachRoutes } from "./modules/outreach/routes";
 import { poolRoutes } from "./modules/pool/routes";
+import { webhookRoutes } from "./modules/notifications/webhook";
 import { portalRoutes } from "./modules/portal/routes";
 import { publicRoutes } from "./modules/publicsite/routes";
 
@@ -74,6 +76,9 @@ app.route("/api/auth", authRoutes);
 /* ---- freelancer portal (its own cookie, guarded inside the router) ---- */
 app.route("/api/portal", portalRoutes);
 
+/* ---- delivery webhooks: no session, authenticated by HMAC signature ---- */
+app.route("/api/webhooks", webhookRoutes);
+
 /* ---- everything else under /api requires a staff session ---- */
 app.use("/api/*", async (c, next) => {
   const path = c.req.path;
@@ -81,6 +86,8 @@ app.use("/api/*", async (c, next) => {
     path.startsWith("/api/auth/") ||
     path.startsWith("/api/public/") ||
     path.startsWith("/api/portal/") ||
+    // Signed by the provider instead: a session cookie is meaningless here.
+    path.startsWith("/api/webhooks/") ||
     path === "/api/health"
   ) {
     return next();
@@ -111,5 +118,12 @@ export default {
   fetch: app.fetch,
   scheduled: async (_event: ScheduledEvent, env: Env, ctx: ExecutionContext) => {
     ctx.waitUntil(runScheduledJobs(env));
+  },
+  /**
+   * Incoming email. Inert until Email Routing on a real domain is pointed at
+   * this Worker — see modules/inbound/email.ts for the three steps.
+   */
+  email: async (message: Parameters<typeof handleInboundEmail>[0], env: Env) => {
+    await handleInboundEmail(message, env);
   },
 };

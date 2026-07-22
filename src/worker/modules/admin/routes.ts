@@ -430,3 +430,32 @@ adminRoutes.get("/preview/email", async (c) => {
   }
   return c.json(rendered);
 });
+
+/* ---------------------------------------------------------------- alerts */
+
+/**
+ * Open security alerts. Read from the database rather than an inbox, so they
+ * are visible whether or not outbound email was working when they were raised.
+ */
+adminRoutes.get("/alerts", async (c) => {
+  const rows = await all<Record<string, unknown>>(
+    c.env.DB,
+    `SELECT id, kind, severity, summary, detail, user_name, emailed, acknowledged_at, created_at
+     FROM alerts ORDER BY acknowledged_at IS NOT NULL, created_at DESC LIMIT 100`,
+  );
+  const open = rows.filter((r) => r.acknowledged_at === null).length;
+  return c.json({ alerts: rows, open });
+});
+
+adminRoutes.post("/alerts/:id/acknowledge", async (c) => {
+  const user = c.get("user");
+  const res = await run(
+    c.env.DB,
+    `UPDATE alerts SET acknowledged_at = datetime('now'), acknowledged_by = ?
+     WHERE id = ? AND acknowledged_at IS NULL`,
+    user.name,
+    c.req.param("id"),
+  );
+  if (!res.meta.changes) throw notFound("No such open alert");
+  return c.json({ ok: true });
+});
