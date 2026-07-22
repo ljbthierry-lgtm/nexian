@@ -1,0 +1,147 @@
+/** Typed fetch wrapper — the only place HTTP happens on the client. */
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    public code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method,
+    credentials: "same-origin",
+    headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const ct = res.headers.get("content-type") ?? "";
+  if (!res.ok) {
+    let code = "error";
+    let message = `Request failed (${res.status})`;
+    if (ct.includes("application/json")) {
+      const data = (await res.json()) as { error?: string; message?: string };
+      code = data.error ?? code;
+      message = data.message ?? message;
+    }
+    throw new ApiError(res.status, code, message);
+  }
+  if (ct.includes("application/json")) return (await res.json()) as T;
+  return (await res.text()) as unknown as T;
+}
+
+export const api = {
+  get: <T>(path: string) => request<T>("GET", path),
+  post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
+  patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, body),
+  del: <T>(path: string) => request<T>("DELETE", path),
+  async upload<T>(path: string, file: File): Promise<T> {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(path, { method: "POST", credentials: "same-origin", body: form });
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+      throw new ApiError(res.status, data.error ?? "error", data.message ?? "Upload failed");
+    }
+    return (await res.json()) as T;
+  },
+};
+
+/* ------------------------------------------------------------------ types */
+
+export type Stage = "prospect" | "contacted" | "registered" | "vetted" | "on_mission" | "closed";
+export type Availability = "now" | "from_date" | "not_available" | "unknown";
+
+export interface Me {
+  id: string;
+  email: string;
+  name: string;
+  role: "admin" | "recruiter";
+}
+
+export interface Consents {
+  data_processing: boolean;
+  mission_alerts: boolean;
+  news: boolean;
+}
+
+export interface Contact {
+  id: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  phone: string | null;
+  linkedin_url: string | null;
+  source: string;
+  source_note: string | null;
+  stage: Stage;
+  suppressed: boolean;
+  suppressed_reason: string | null;
+  outreach_count: number;
+  last_outreach_at: string | null;
+  linkedin_state: "none" | "queued" | "sent";
+  has_profile: boolean;
+  created_at: string;
+  consents?: Consents;
+}
+
+export interface PoolMember {
+  id: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  stage: Stage;
+  headline: string;
+  years_experience: number | null;
+  skills: string[];
+  industries: string[];
+  languages: string[];
+  daily_rate: number | null;
+  currency: string;
+  availability: Availability;
+  available_from: string | null;
+  location: string | null;
+  remote_ok: boolean;
+  cv_filename: string | null;
+  updated_at: string;
+  last_confirmed_at: string | null;
+  consents?: Consents;
+}
+
+export interface Taxonomy {
+  skills: string[];
+  industries: string[];
+  languages: string[];
+  policyVersion: string;
+  companyName: string;
+}
+
+export interface ActivityEntry {
+  kind: string;
+  summary: string;
+  detail: string | null;
+  created_at: string;
+}
+
+export interface ConsentRecord {
+  purpose: keyof Consents;
+  granted: number;
+  source: string;
+  policy_version: string;
+  created_at: string;
+}
+
+export interface Campaign {
+  id: string;
+  name: string;
+  subject: string;
+  purpose: "mission_alerts" | "news";
+  status: "draft" | "sending" | "sent";
+  created_at: string;
+  sent_at: string | null;
+  sent_count: number;
+  failed_count: number;
+  created_by_name?: string | null;
+}

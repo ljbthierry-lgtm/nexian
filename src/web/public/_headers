@@ -1,0 +1,8 @@
+# Security headers for statically served assets (the SPA shell).
+# Cloudflare serves these from the edge, bypassing the Worker, so the headers set
+# in src/worker/index.ts do not apply here.
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: same-origin
+  Permissions-Policy: geolocation=(), microphone=(), camera=()

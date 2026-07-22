@@ -1,0 +1,5 @@
+# Copy to .dev.vars for local development (never committed).
+SETUP_KEY=local-dev-setup-key-123
+# Leave RESEND_API_KEY unset locally: with APP_ENV=development the Worker logs
+# emails instead of sending them, so no real freelancer can be contacted by accident.
+# RESEND_API_KEY=re_xxx

@@ -1,0 +1,62 @@
+# Nexian Talent Pool — Cloudflare Worker configuration
+# Secrets (set via `wrangler secret put <NAME>` — NEVER in this file):
+#   RESEND_API_KEY  — Resend API key for outbound email
+#   SETUP_KEY       — one-time bootstrap key to create the first admin user
+
+name = "nexian-talent-pool"
+main = "src/worker/index.ts"
+compatibility_date = "2026-06-01"
+
+# Front-end SPA is served from ./dist/web; /api and /a (email action links)
+# always hit the Worker first.
+[assets]
+directory = "./dist/web"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*", "/a/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "nexian_talent"
+database_id = "REPLACE_AFTER_wrangler_d1_create"   # npm run setup:cloudflare fills this in
+
+[triggers]
+# Daily 07:00 UTC: outreach follow-ups, availability reminders, GDPR retention sweep.
+crons = ["0 7 * * *"]
+
+[vars]
+APP_ENV = "production"
+# Absolute URL used in email links. Leave the placeholder for a first deploy —
+# the Worker then learns its own *.workers.dev origin from incoming requests.
+# Set this to your custom domain once you have one (it always takes priority).
+BASE_URL = "https://talent.example.com"
+EMAIL_FROM = "Nexian Talent <talent@example.com>"
+COMPANY_NAME = "Nexian"
+# Version of the privacy policy stored with every consent record. Bump this when
+# the policy text changes materially — old consents stay attributed to the old text.
+PRIVACY_POLICY_VERSION = "2026-07-v1"
+# Outreach guard rails (GDPR legitimate-interest limits).
+MAX_OUTREACH_TOUCHES = "2"
+FOLLOWUP_AFTER_DAYS = "10"
+# A registered freelancer is nudged to confirm availability this often.
+AVAILABILITY_REMINDER_DAYS = "90"
+# Prospects who never engaged are anonymised after this many days.
+PROSPECT_RETENTION_DAYS = "365"
+
+# ---- per-environment overrides (wrangler deploy --env staging) ----
+[env.staging]
+name = "nexian-talent-pool-staging"
+[env.staging.vars]
+APP_ENV = "staging"
+BASE_URL = "https://talent-staging.example.com"
+EMAIL_FROM = "Nexian Talent STAGING <talent@example.com>"
+COMPANY_NAME = "Nexian"
+PRIVACY_POLICY_VERSION = "2026-07-v1"
+MAX_OUTREACH_TOUCHES = "2"
+FOLLOWUP_AFTER_DAYS = "10"
+AVAILABILITY_REMINDER_DAYS = "90"
+PROSPECT_RETENTION_DAYS = "365"
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "nexian_talent_staging"
+database_id = "REPLACE_AFTER_wrangler_d1_create_staging"

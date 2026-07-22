@@ -1,0 +1,230 @@
+/** Admin: staff accounts, the skill and industry lists, and GDPR housekeeping. */
+import { Hono } from "hono";
+import { z } from "zod";
+import type { AppContext } from "../../env";
+import { resolveBaseUrl } from "../../lib/baseUrl";
+import { all, first, run, uid } from "../../lib/db";
+import { badRequest, notFound } from "../../lib/errors";
+import { requireAuth, requireRole } from "../../middleware/auth";
+import { sendEmail } from "../notifications/resend";
+import { setPasswordEmail } from "../notifications/templates";
+import { createActionToken } from "../notifications/tokens";
+import { findExpiredProspects, runRetentionSweep } from "./retention";
+
+export const adminRoutes = new Hono<AppContext>();
+adminRoutes.use("*", requireAuth(), requireRole("admin"));
+
+/* ------------------------------------------------------------------ users */
+
+adminRoutes.get("/users", async (c) => {
+  const users = await all<Record<string, unknown>>(
+    c.env.DB,
+    `SELECT id, email, name, role, active, created_at,
+            CASE WHEN pw_hash IS NULL THEN 0 ELSE 1 END AS has_password
+     FROM users ORDER BY created_at`,
+  );
+  return c.json({ users });
+});
+
+adminRoutes.post("/users", async (c) => {
+  const input = z
+    .object({
+      email: z.string().email(),
+      name: z.string().trim().min(1).max(120),
+      role: z.enum(["admin", "recruiter"]).default("recruiter"),
+    })
+    .parse(await c.req.json());
+
+  const email = input.email.trim().toLowerCase();
+  const clash = await first<{ id: string }>(
+    c.env.DB,
+    `SELECT id FROM users WHERE email = ?`,
+    email,
+  );
+  if (clash) throw badRequest("Someone already has that email address.", "duplicate");
+
+  const id = uid();
+  await run(
+    c.env.DB,
+    `INSERT INTO users (id, email, name, role) VALUES (?, ?, ?, ?)`,
+    id,
+    email,
+    input.name,
+    input.role,
+  );
+
+  const baseUrl = await resolveBaseUrl(c.env);
+  const token = await createActionToken(c.env.DB, { purpose: "set_password", userId: id });
+  const mail = setPasswordEmail(
+    { companyName: c.env.COMPANY_NAME, baseUrl },
+    { name: input.name, url: `${baseUrl}/set-password?token=${token}` },
+  );
+  const sent = await sendEmail(c.env, {
+    to: email,
+    subject: mail.subject,
+    html: mail.html,
+    template: "set_password",
+  });
+  // Surfaced so an admin can hand the link over another way when mail is not
+  // configured yet, instead of silently creating an account nobody can enter.
+  return c.json({
+    ok: true,
+    id,
+    invitationSent: sent,
+    setPasswordUrl: sent ? undefined : `${baseUrl}/set-password?token=${token}`,
+  });
+});
+
+adminRoutes.patch("/users/:id", async (c) => {
+  const id = c.req.param("id");
+  const input = z
+    .object({
+      name: z.string().trim().min(1).max(120).optional(),
+      role: z.enum(["admin", "recruiter"]).optional(),
+      active: z.boolean().optional(),
+    })
+    .parse(await c.req.json());
+
+  if (input.active === false || input.role === "recruiter") {
+    // Never let the last admin lock everyone out of the back office.
+    const others = await first<{ n: number }>(
+      c.env.DB,
+      `SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1 AND id != ?`,
+      id,
+    );
+    const target = await first<{ role: string }>(
+      c.env.DB,
+      `SELECT role FROM users WHERE id = ?`,
+      id,
+    );
+    if (target?.role === "admin" && (others?.n ?? 0) === 0) {
+      throw badRequest("This is the last active admin — promote someone else first.", "last_admin");
+    }
+  }
+
+  const fields: string[] = [];
+  const params: unknown[] = [];
+  if (input.name !== undefined) {
+    fields.push("name = ?");
+    params.push(input.name);
+  }
+  if (input.role !== undefined) {
+    fields.push("role = ?");
+    params.push(input.role);
+  }
+  if (input.active !== undefined) {
+    fields.push("active = ?");
+    params.push(input.active ? 1 : 0);
+  }
+  if (!fields.length) return c.json({ ok: true });
+
+  await run(c.env.DB, `UPDATE users SET ${fields.join(", ")} WHERE id = ?`, ...params, id);
+  if (input.active === false) {
+    await run(c.env.DB, `DELETE FROM sessions WHERE user_id = ?`, id);
+  }
+  return c.json({ ok: true });
+});
+
+/* --------------------------------------------------------------- taxonomy */
+
+adminRoutes.get("/taxonomy", async (c) => {
+  const rows = await all<Record<string, unknown>>(
+    c.env.DB,
+    `SELECT id, kind, label, sort, active FROM taxonomy ORDER BY kind, sort, label`,
+  );
+  return c.json({ taxonomy: rows });
+});
+
+adminRoutes.post("/taxonomy", async (c) => {
+  const input = z
+    .object({
+      kind: z.enum(["skill", "industry", "language"]),
+      label: z.string().trim().min(1).max(80),
+      sort: z.number().int().min(0).max(9999).default(500),
+    })
+    .parse(await c.req.json());
+  const id = uid();
+  try {
+    await run(
+      c.env.DB,
+      `INSERT INTO taxonomy (id, kind, label, sort) VALUES (?, ?, ?, ?)`,
+      id,
+      input.kind,
+      input.label,
+      input.sort,
+    );
+  } catch {
+    throw badRequest(`“${input.label}” is already in the ${input.kind} list.`, "duplicate");
+  }
+  return c.json({ ok: true, id });
+});
+
+adminRoutes.patch("/taxonomy/:id", async (c) => {
+  const input = z
+    .object({
+      label: z.string().trim().min(1).max(80).optional(),
+      sort: z.number().int().min(0).max(9999).optional(),
+      active: z.boolean().optional(),
+    })
+    .parse(await c.req.json());
+  const fields: string[] = [];
+  const params: unknown[] = [];
+  if (input.label !== undefined) {
+    fields.push("label = ?");
+    params.push(input.label);
+  }
+  if (input.sort !== undefined) {
+    fields.push("sort = ?");
+    params.push(input.sort);
+  }
+  if (input.active !== undefined) {
+    fields.push("active = ?");
+    params.push(input.active ? 1 : 0);
+  }
+  if (!fields.length) return c.json({ ok: true });
+  const res = await run(
+    c.env.DB,
+    `UPDATE taxonomy SET ${fields.join(", ")} WHERE id = ?`,
+    ...params,
+    c.req.param("id"),
+  );
+  if (!res.meta.changes) throw notFound("No such entry");
+  return c.json({ ok: true });
+});
+
+/* --------------------------------------------------------------- retention */
+
+/** What the nightly sweep would remove, so it is never a surprise. */
+adminRoutes.get("/retention/preview", async (c) => {
+  const candidates = await findExpiredProspects(c.env);
+  return c.json({
+    retentionDays: Number(c.env.PROSPECT_RETENTION_DAYS),
+    count: candidates.length,
+    sample: candidates.slice(0, 20).map((x) => ({ email: x.email, added: x.created_at })),
+  });
+});
+
+adminRoutes.post("/retention/run", async (c) => {
+  const count = await runRetentionSweep(c.env);
+  return c.json({ ok: true, anonymised: count });
+});
+
+/** The permanent do-not-contact list — counts only; the addresses are hashed. */
+adminRoutes.get("/suppression", async (c) => {
+  const row = await first<{ n: number }>(c.env.DB, `SELECT COUNT(*) AS n FROM suppression_list`);
+  const recent = await all<{ reason: string; created_at: string }>(
+    c.env.DB,
+    `SELECT reason, created_at FROM suppression_list ORDER BY created_at DESC LIMIT 20`,
+  );
+  return c.json({ total: row?.n ?? 0, recent });
+});
+
+/** Delivery history, for answering "did they actually get it?". */
+adminRoutes.get("/email-log", async (c) => {
+  const rows = await all<Record<string, unknown>>(
+    c.env.DB,
+    `SELECT to_email, template, subject, status, error, created_at
+     FROM email_log ORDER BY created_at DESC LIMIT 200`,
+  );
+  return c.json({ emails: rows });
+});

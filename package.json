@@ -1,0 +1,39 @@
+{
+  "name": "nexian-talent-pool",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Nexian Talent Pool — freelancer outreach CRM, self-service profiles and consent-gated campaigns.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "dev:web": "vite",
+    "build": "vite build",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"test/**/*.ts\" \"migrations/*.sql\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"test/**/*.ts\"",
+    "migrate:local": "wrangler d1 migrations apply nexian_talent --local",
+    "migrate:prod": "wrangler d1 migrations apply nexian_talent --remote",
+    "deploy": "npm run build && wrangler deploy",
+    "setup:cloudflare": "node scripts/setup-cloudflare.mjs",
+    "ci": "npm run format:check && npm run check && npm run test && npm run build"
+  },
+  "dependencies": {
+    "hono": "^4.6.14",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260714.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "prettier": "^3.4.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.8",
+    "wrangler": "^4.0.0"
+  }
+}
