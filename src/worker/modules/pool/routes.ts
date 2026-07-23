@@ -7,7 +7,14 @@ import { consentsFor } from "../../lib/consent";
 import { toCsv } from "../../lib/csv";
 import { all, first } from "../../lib/db";
 import { parseLabels } from "../../lib/labels";
-import { cleanLanguageLevels, cleanMobility, regionLabel } from "../../lib/profileFields";
+import {
+  cleanLanguageLevels,
+  cleanMobility,
+  cleanWorkRegime,
+  noticeLabel,
+  regimeLabel,
+  regionLabel,
+} from "../../lib/profileFields";
 import { clientIp } from "../../lib/rateLimit";
 import { type Segment, buildPoolFilter, whereClause } from "../../lib/segment";
 import { requireAuth } from "../../middleware/auth";
@@ -55,6 +62,9 @@ interface PoolRow {
   languages: string;
   language_levels: string;
   mobility: string;
+  work_regime: string;
+  notice_period: string | null;
+  certifications: string;
   daily_rate: number | null;
   currency: string;
   availability: string;
@@ -70,7 +80,7 @@ interface PoolRow {
 const POOL_SELECT = `
   SELECT ct.id, ct.email, ct.first_name, ct.last_name, ct.stage,
          p.headline, p.years_experience, p.years_relevant, p.skills, p.industries, p.languages,
-         p.language_levels, p.mobility,
+         p.language_levels, p.mobility, p.work_regime, p.notice_period, p.certifications,
          p.daily_rate, p.currency, p.availability, p.available_from, p.location,
          p.remote_ok, p.cv_filename, p.updated_at, p.last_confirmed_at, p.verified_at
   FROM contacts ct
@@ -106,6 +116,9 @@ poolRoutes.get("/", async (c) => {
       languages: parseLabels(r.languages),
       language_levels: safeParse(r.language_levels),
       mobility: safeParse(r.mobility),
+      work_regime: safeParse(r.work_regime),
+      notice_period: r.notice_period,
+      certifications: parseLabels(r.certifications),
       remote_ok: r.remote_ok === 1,
       verified: r.verified_at !== null,
       consents: consents.get(r.id),
@@ -160,6 +173,9 @@ poolRoutes.get("/export/csv", async (c) => {
       "Years relevant",
       "Languages (graded)",
       "Mobility",
+      "Work regime",
+      "Notice period",
+      "Certifications",
       "Skills",
       "Industries",
       "Languages",
@@ -181,6 +197,9 @@ poolRoutes.get("/export/csv", async (c) => {
       r.years_relevant ?? "",
       gradedLanguages(r.language_levels),
       mobilityLabels(r.mobility),
+      cleanWorkRegime(safeParse(r.work_regime)).map(regimeLabel).join("; "),
+      noticeLabel(r.notice_period),
+      parseLabels(r.certifications).join("; "),
       parseLabels(r.skills).join("; "),
       parseLabels(r.industries).join("; "),
       parseLabels(r.languages).join("; "),

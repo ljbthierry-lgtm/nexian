@@ -13,8 +13,12 @@ import {
   BELGIAN_REGIONS,
   GRADED_LANGUAGES,
   LANGUAGE_LEVELS,
+  NOTICE_PERIODS,
+  WORK_REGIMES,
   cleanLanguageLevels,
   cleanMobility,
+  cleanNoticePeriod,
+  cleanWorkRegime,
   languagesFromLevels,
   regionLabel,
 } from "../src/worker/lib/profileFields";
@@ -75,6 +79,30 @@ describe("mobility across the Belgian regions", () => {
   });
 });
 
+describe("work regime", () => {
+  it("keeps both codes, since a freelancer may offer both", () => {
+    expect(cleanWorkRegime(["full_time", "part_time"])).toEqual(["full_time", "part_time"]);
+  });
+
+  it("drops anything that is not a regime, and de-duplicates", () => {
+    expect(cleanWorkRegime(["full_time", "full_time", "weekends", 3])).toEqual(["full_time"]);
+    expect(cleanWorkRegime("full_time")).toEqual([]);
+  });
+});
+
+describe("notice period", () => {
+  it("keeps a recognised code", () => {
+    expect(cleanNoticePeriod("1_month")).toBe("1_month");
+    expect(cleanNoticePeriod("immediate")).toBe("immediate");
+  });
+
+  it("returns null for anything it does not know", () => {
+    for (const junk of ["someday", "", null, undefined, 30, "1month"]) {
+      expect(cleanNoticePeriod(junk)).toBeNull();
+    }
+  });
+});
+
 describe("the client mirror stays in step with the worker authority", () => {
   // src/web/profileFields.ts drives the forms; the worker copy validates. If
   // the two ever list different levels or regions, a freelancer could pick a
@@ -94,5 +122,10 @@ describe("the client mirror stays in step with the worker authority", () => {
 
   it("shares the same region codes", () => {
     for (const region of BELGIAN_REGIONS) expect(clientSrc).toContain(`code: "${region.code}"`);
+  });
+
+  it("shares the same work regimes and notice periods", () => {
+    for (const r of WORK_REGIMES) expect(clientSrc).toContain(`code: "${r.code}"`);
+    for (const n of NOTICE_PERIODS) expect(clientSrc).toContain(`code: "${n.code}"`);
   });
 });

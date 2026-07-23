@@ -24,7 +24,13 @@ import { all, first, run } from "../../lib/db";
 import { parseLabels, serialiseLabels } from "../../lib/labels";
 import { badRequest, notFound } from "../../lib/errors";
 import { suppressContact } from "../../lib/suppress";
-import { cleanLanguageLevels, cleanMobility, languagesFromLevels } from "../../lib/profileFields";
+import {
+  cleanLanguageLevels,
+  cleanMobility,
+  cleanNoticePeriod,
+  cleanWorkRegime,
+  languagesFromLevels,
+} from "../../lib/profileFields";
 import { requirePortal } from "../../middleware/auth";
 
 /** D1 gives back a string; a corrupt value must not throw the whole load. */
@@ -50,6 +56,9 @@ interface ProfileRow {
   languages: string;
   language_levels: string;
   mobility: string;
+  work_regime: string;
+  notice_period: string | null;
+  certifications: string;
   daily_rate: number | null;
   currency: string;
   availability: string;
@@ -69,7 +78,7 @@ async function loadProfile(db: D1Database, contactId: string) {
   const row = await first<ProfileRow>(
     db,
     `SELECT headline, years_experience, years_relevant, skills, industries, languages,
-            language_levels, mobility, daily_rate, currency,
+            language_levels, mobility, work_regime, notice_period, certifications, daily_rate, currency,
             availability, available_from, location, remote_ok, freelancer_note,
             cv_filename, cv_size, cv_uploaded_at, registered_at, updated_at, last_confirmed_at
      FROM profiles WHERE contact_id = ?`,
@@ -83,6 +92,9 @@ async function loadProfile(db: D1Database, contactId: string) {
     languages: parseLabels(row.languages),
     language_levels: cleanLanguageLevels(safeJson(row.language_levels)),
     mobility: cleanMobility(safeJson(row.mobility)),
+    work_regime: cleanWorkRegime(safeJson(row.work_regime)),
+    notice_period: row.notice_period,
+    certifications: parseLabels(row.certifications),
     remote_ok: row.remote_ok === 1,
   };
 }
@@ -107,6 +119,9 @@ const profileSchema = z.object({
   languages: z.array(z.string().trim().min(1).max(40)).max(15).optional(),
   language_levels: z.record(z.string(), z.string()).optional(),
   mobility: z.array(z.string()).max(10).optional(),
+  work_regime: z.array(z.string()).max(4).optional(),
+  notice_period: z.string().max(30).nullable().optional(),
+  certifications: z.array(z.string().trim().min(1).max(120)).max(40).optional(),
   daily_rate: z.number().int().min(0).max(10000).nullable().optional(),
   availability: z.enum(["now", "from_date", "not_available"]).optional(),
   available_from: z
@@ -174,6 +189,13 @@ portalRoutes.patch("/profile", async (c) => {
     set("languages", serialiseLabels(input.languages));
   }
   if (input.mobility !== undefined) set("mobility", JSON.stringify(cleanMobility(input.mobility)));
+  if (input.work_regime !== undefined) {
+    set("work_regime", JSON.stringify(cleanWorkRegime(input.work_regime)));
+  }
+  if (input.notice_period !== undefined)
+    set("notice_period", cleanNoticePeriod(input.notice_period));
+  if (input.certifications !== undefined)
+    set("certifications", serialiseLabels(input.certifications));
   if (input.daily_rate !== undefined) set("daily_rate", input.daily_rate);
   if (input.availability !== undefined) set("availability", input.availability);
   if (input.available_from !== undefined) set("available_from", input.available_from);

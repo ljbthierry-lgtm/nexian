@@ -7,6 +7,10 @@ import {
   LANGUAGE_LEVELS,
   LANGUAGE_LEVEL_LABEL,
   type LanguageLevel,
+  NOTICE_PERIODS,
+  WORK_REGIMES,
+  noticeLabel,
+  regimeLabel,
   regionLabel,
 } from "../profileFields";
 
@@ -19,6 +23,9 @@ interface PortalProfile {
   languages: string[];
   language_levels: Record<string, LanguageLevel>;
   mobility: string[];
+  work_regime: string[];
+  notice_period: string | null;
+  certifications: string[];
   daily_rate: number | null;
   currency: string;
   availability: Availability;
@@ -60,6 +67,9 @@ const PREVIEW_DATA: PortalMe = {
     languages: ["Dutch", "French", "English"],
     language_levels: { Dutch: "native", French: "fluent", English: "good" },
     mobility: ["brussels", "flanders"],
+    work_regime: ["full_time", "part_time"],
+    notice_period: "1_month",
+    certifications: ["PMP (Project Management Professional)", "Prosci / ADKAR Change Management"],
     daily_rate: 750,
     currency: "EUR",
     availability: "from_date",
@@ -255,6 +265,13 @@ export function Portal({ preview = false }: { preview?: boolean }) {
                 <Row label="Mobility">
                   {profile.mobility?.length ? profile.mobility.map(regionLabel).join(" · ") : "—"}
                 </Row>
+                <Row label="Work regime">
+                  {profile.work_regime?.length
+                    ? profile.work_regime.map(regimeLabel).join(" · ")
+                    : "—"}
+                </Row>
+                <Row label="Notice period">{noticeLabel(profile.notice_period) || "—"}</Row>
+                <Row label="Certifications">{profile.certifications?.join(" · ") || "—"}</Row>
                 <Row label="Based in">
                   {profile.location || "—"}
                   {profile.remote_ok ? " · open to remote" : ""}
@@ -479,6 +496,7 @@ function EditForm({
     availability: (profile.availability === "unknown" ? "now" : profile.availability) as
       "now" | "from_date" | "not_available",
     available_from: profile.available_from ?? "",
+    notice_period: profile.notice_period ?? "",
     location: profile.location ?? "",
     remote_ok: profile.remote_ok,
     freelancer_note: profile.freelancer_note ?? "",
@@ -491,6 +509,8 @@ function EditForm({
     profile.language_levels ?? {},
   );
   const [mobility, setMobility] = useState<string[]>(profile.mobility ?? []);
+  const [workRegime, setWorkRegime] = useState<string[]>(profile.work_regime ?? []);
+  const [certifications, setCertifications] = useState<string[]>(profile.certifications ?? []);
 
   return (
     <form
@@ -514,6 +534,9 @@ function EditForm({
           languages,
           language_levels: langLevels,
           mobility,
+          work_regime: workRegime,
+          notice_period: f.notice_period || null,
+          certifications,
         });
       }}
     >
@@ -631,6 +654,15 @@ function EditForm({
         />
       </div>
       <div className="field">
+        <label>Certifications</label>
+        <ChipPicker
+          options={tax?.certifications ?? []}
+          selected={certifications}
+          onChange={setCertifications}
+          allowCustom
+        />
+      </div>
+      <div className="field">
         <label>Languages</label>
         <div className="lang-grid">
           {GRADED_LANGUAGES.map((lang) => (
@@ -693,6 +725,47 @@ function EditForm({
               </button>
             );
           })}
+        </div>
+      </div>
+
+      <div className="grid2">
+        <div className="field">
+          <label>Work regime</label>
+          <div className="chips">
+            {WORK_REGIMES.map((r) => {
+              const on = workRegime.includes(r.code);
+              return (
+                <button
+                  key={r.code}
+                  type="button"
+                  className={`chip ${on ? "on" : ""}`}
+                  aria-pressed={on}
+                  onClick={() =>
+                    setWorkRegime((prev) =>
+                      prev.includes(r.code) ? prev.filter((c) => c !== r.code) : [...prev, r.code],
+                    )
+                  }
+                >
+                  {r.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div className="field">
+          <label htmlFor="e-notice">Notice period</label>
+          <select
+            id="e-notice"
+            value={f.notice_period}
+            onChange={(e) => setF({ ...f, notice_period: e.target.value })}
+          >
+            <option value="">Prefer not to say</option>
+            {NOTICE_PERIODS.map((n) => (
+              <option key={n.code} value={n.code}>
+                {n.label}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 

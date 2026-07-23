@@ -16,7 +16,13 @@ import { all, first, run, uid } from "../../lib/db";
 import { ALLOWED_CV_TYPES, MAX_CV_BYTES, isAcceptableCv, putCv } from "../../lib/cvStore";
 import { serialiseLabels } from "../../lib/labels";
 import { linkedinKey } from "../../lib/linkedinKey";
-import { cleanLanguageLevels, cleanMobility, languagesFromLevels } from "../../lib/profileFields";
+import {
+  cleanLanguageLevels,
+  cleanMobility,
+  cleanNoticePeriod,
+  cleanWorkRegime,
+  languagesFromLevels,
+} from "../../lib/profileFields";
 import { badRequest, tooManyRequests } from "../../lib/errors";
 import { log } from "../../lib/log";
 import { RATE_LIMITS, clientIp, hitRateLimit } from "../../lib/rateLimit";
@@ -41,6 +47,9 @@ const registerSchema = z.object({
   languages: z.array(z.string().trim().min(1).max(40)).max(15).default([]),
   language_levels: z.record(z.string(), z.string()).optional(),
   mobility: z.array(z.string()).max(10).optional(),
+  work_regime: z.array(z.string()).max(4).optional(),
+  notice_period: z.string().max(30).optional(),
+  certifications: z.array(z.string().trim().min(1).max(120)).max(40).default([]),
   daily_rate: z.number().int().min(0).max(10000).optional(),
   availability: z.enum(["now", "from_date", "not_available"]),
   available_from: z
@@ -70,6 +79,7 @@ publicRoutes.get("/taxonomy", async (c) => {
     skills: rows.filter((r) => r.kind === "skill").map((r) => r.label),
     industries: rows.filter((r) => r.kind === "industry").map((r) => r.label),
     languages: rows.filter((r) => r.kind === "language").map((r) => r.label),
+    certifications: rows.filter((r) => r.kind === "certification").map((r) => r.label),
     policyVersion: c.env.PRIVACY_POLICY_VERSION,
     companyName: c.env.COMPANY_NAME,
   });
@@ -140,6 +150,8 @@ publicRoutes.post("/register", async (c) => {
   }
   const levels = cleanLanguageLevels(input.language_levels);
   const mobility = cleanMobility(input.mobility);
+  const workRegime = cleanWorkRegime(input.work_regime);
+  const noticePeriod = cleanNoticePeriod(input.notice_period);
   if (cv && !isAcceptableCv(cv.name, cv.type)) {
     throw badRequest("Please upload a PDF or Word document as your CV.");
   }
@@ -307,9 +319,10 @@ publicRoutes.post("/register", async (c) => {
   await run(
     c.env.DB,
     `INSERT INTO profiles (contact_id, headline, years_experience, years_relevant, skills, industries,
-       languages, language_levels, mobility, daily_rate, availability, available_from, location,
-       remote_ok, freelancer_note, last_confirmed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+       languages, language_levels, mobility, work_regime, notice_period, certifications,
+       daily_rate, availability, available_from, location, remote_ok, freelancer_note,
+       last_confirmed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
     contactId,
     input.headline ?? "",
     input.years_experience ?? null,
@@ -319,6 +332,9 @@ publicRoutes.post("/register", async (c) => {
     serialiseLabels(languagesFromLevels(levels, input.languages)),
     JSON.stringify(levels),
     JSON.stringify(mobility),
+    JSON.stringify(workRegime),
+    noticePeriod,
+    serialiseLabels(input.certifications),
     input.daily_rate ?? null,
     input.availability,
     input.available_from ?? null,

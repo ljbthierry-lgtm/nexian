@@ -31,3 +31,26 @@ export const BELGIAN_REGIONS = [
 export function regionLabel(code: string): string {
   return BELGIAN_REGIONS.find((r) => r.code === code)?.label ?? code;
 }
+
+export const WORK_REGIMES = [
+  { code: "full_time", label: "Full-time" },
+  { code: "part_time", label: "Part-time" },
+] as const;
+
+export function regimeLabel(code: string): string {
+  return WORK_REGIMES.find((r) => r.code === code)?.label ?? code;
+}
+
+export const NOTICE_PERIODS = [
+  { code: "immediate", label: "Immediately" },
+  { code: "1_week", label: "Within 1 week" },
+  { code: "2_weeks", label: "Within 2 weeks" },
+  { code: "1_month", label: "1 month" },
+  { code: "2_months", label: "2 months" },
+  { code: "3_months_plus", label: "3 months or more" },
+] as const;
+
+export function noticeLabel(code: string | null): string {
+  if (!code) return "";
+  return NOTICE_PERIODS.find((n) => n.code === code)?.label ?? code;
+}

@@ -151,6 +151,7 @@ export interface Taxonomy {
   skills: string[];
   industries: string[];
   languages: string[];
+  certifications: string[];
   policyVersion: string;
   companyName: string;
 }

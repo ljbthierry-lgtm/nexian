@@ -93,3 +93,58 @@ export function cleanMobility(input: unknown): RegionCode[] {
 export function regionLabel(code: string): string {
   return BELGIAN_REGIONS.find((r) => r.code === code)?.label ?? code;
 }
+
+/** Work regime — a freelancer may offer both. */
+export const WORK_REGIMES = [
+  { code: "full_time", label: "Full-time" },
+  { code: "part_time", label: "Part-time" },
+] as const;
+
+export type WorkRegime = (typeof WORK_REGIMES)[number]["code"];
+
+const REGIME_CODES = new Set(WORK_REGIMES.map((r) => r.code));
+
+export function cleanWorkRegime(input: unknown): WorkRegime[] {
+  if (!Array.isArray(input)) return [];
+  const out: WorkRegime[] = [];
+  for (const code of input) {
+    if (
+      typeof code === "string" &&
+      REGIME_CODES.has(code as WorkRegime) &&
+      !out.includes(code as WorkRegime)
+    ) {
+      out.push(code as WorkRegime);
+    }
+  }
+  return out;
+}
+
+export function regimeLabel(code: string): string {
+  return WORK_REGIMES.find((r) => r.code === code)?.label ?? code;
+}
+
+/** How soon a freelancer can start once engaged — their current commitment. */
+export const NOTICE_PERIODS = [
+  { code: "immediate", label: "Immediately" },
+  { code: "1_week", label: "Within 1 week" },
+  { code: "2_weeks", label: "Within 2 weeks" },
+  { code: "1_month", label: "1 month" },
+  { code: "2_months", label: "2 months" },
+  { code: "3_months_plus", label: "3 months or more" },
+] as const;
+
+export type NoticePeriod = (typeof NOTICE_PERIODS)[number]["code"];
+
+const NOTICE_CODES = new Set(NOTICE_PERIODS.map((n) => n.code));
+
+/** A recognised code, or null — an unknown value is not stored. */
+export function cleanNoticePeriod(input: unknown): NoticePeriod | null {
+  return typeof input === "string" && NOTICE_CODES.has(input as NoticePeriod)
+    ? (input as NoticePeriod)
+    : null;
+}
+
+export function noticeLabel(code: string | null): string {
+  if (!code) return "";
+  return NOTICE_PERIODS.find((n) => n.code === code)?.label ?? code;
+}

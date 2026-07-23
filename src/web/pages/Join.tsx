@@ -7,6 +7,8 @@ import {
   LANGUAGE_LEVELS,
   LANGUAGE_LEVEL_LABEL,
   type LanguageLevel,
+  NOTICE_PERIODS,
+  WORK_REGIMES,
 } from "../profileFields";
 
 /**
@@ -56,6 +58,7 @@ export function Join() {
     daily_rate: "",
     availability: "now" as Availability,
     available_from: "",
+    notice_period: "",
     location: "",
     remote_ok: false,
     freelancer_note: "",
@@ -65,6 +68,8 @@ export function Join() {
   const [languages, setLanguages] = useState<string[]>([]);
   const [langLevels, setLangLevels] = useState<Record<string, LanguageLevel>>({});
   const [mobility, setMobility] = useState<string[]>([]);
+  const [workRegime, setWorkRegime] = useState<string[]>([]);
+  const [certifications, setCertifications] = useState<string[]>([]);
   const [consent, setConsent] = useState({ data: false, alerts: false, news: false });
 
   const [cv, setCv] = useState<File | null>(null);
@@ -130,6 +135,9 @@ export function Join() {
           years_relevant: form.years_relevant ? Number(form.years_relevant) : undefined,
           language_levels: langLevels,
           mobility,
+          work_regime: workRegime,
+          notice_period: form.notice_period || undefined,
+          certifications,
           skills,
           industries,
           languages,
@@ -359,6 +367,18 @@ export function Join() {
         </div>
 
         <div className="field">
+          <label>
+            Certifications <span className="hint">— pick any you hold, or add your own</span>
+          </label>
+          <ChipPicker
+            options={tax?.certifications ?? []}
+            selected={certifications}
+            onChange={setCertifications}
+            allowCustom
+          />
+        </div>
+
+        <div className="field">
           <label>Languages</label>
           <p className="hint" style={{ margin: "0 0 8px" }}>
             Grade the three we work in. Leave a language blank if you don't use it.
@@ -428,6 +448,51 @@ export function Join() {
                 </button>
               );
             })}
+          </div>
+        </div>
+
+        <div className="grid2">
+          <div className="field">
+            <label>Work regime</label>
+            <div className="chips">
+              {WORK_REGIMES.map((r) => {
+                const on = workRegime.includes(r.code);
+                return (
+                  <button
+                    key={r.code}
+                    type="button"
+                    className={`chip ${on ? "on" : ""}`}
+                    aria-pressed={on}
+                    onClick={() =>
+                      setWorkRegime((prev) =>
+                        prev.includes(r.code)
+                          ? prev.filter((c) => c !== r.code)
+                          : [...prev, r.code],
+                      )
+                    }
+                  >
+                    {r.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="field">
+            <label htmlFor="notice">
+              Notice period <span className="hint">— how soon you could start</span>
+            </label>
+            <select
+              id="notice"
+              value={form.notice_period}
+              onChange={(e) => set("notice_period", e.target.value)}
+            >
+              <option value="">Prefer not to say</option>
+              {NOTICE_PERIODS.map((n) => (
+                <option key={n.code} value={n.code}>
+                  {n.label}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
