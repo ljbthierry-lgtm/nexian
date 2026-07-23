@@ -30,12 +30,10 @@ interface Stats {
 export function Contacts() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filters, setFilters] = useState({ stage: "", suppressed: "", search: "" });
   const [loading, setLoading] = useState(true);
   const [flash, setFlash] = useState<{ kind: "ok" | "error" | "warn"; text: string } | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
-  const [linkedInId, setLinkedInId] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
 
@@ -52,7 +50,6 @@ export function Contacts() {
       ]);
       setContacts(list.contacts);
       setStats(s);
-      setSelected(new Set());
     } finally {
       setLoading(false);
     }
@@ -62,43 +59,13 @@ export function Contacts() {
     void load();
   }, [load]);
 
-  async function sendInvites() {
-    const ids = [...selected];
-    if (!ids.length) return;
-    try {
-      const res = await api.post<{ sent: number; skipped: { email: string; reason?: string }[] }>(
-        "/api/outreach/send",
-        { contactIds: ids },
-      );
-      const skippedNote = res.skipped.length
-        ? ` ${res.skipped.length} skipped: ${res.skipped
-            .slice(0, 3)
-            .map((s) => `${s.email} (${s.reason})`)
-            .join("; ")}${res.skipped.length > 3 ? "…" : ""}`
-        : "";
-      setFlash({
-        kind: res.sent ? "ok" : "warn",
-        text: `Sent ${res.sent} email${res.sent === 1 ? "" : "s"}.${skippedNote}`,
-      });
-      await load();
-    } catch (err) {
-      setFlash({ kind: "error", text: err instanceof ApiError ? err.message : "Could not send" });
-    }
-  }
-
-  const toggle = (id: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-
   return (
     <>
-      <h1>Contacts &amp; outreach</h1>
+      <h1>Contacts</h1>
       <p>
-        Everyone starts as a prospect, <strong>opted out by default</strong>. They become
-        contactable for campaigns only after registering and giving consent themselves.
+        The full record for everyone we know of. Inviting people, the email wave and the LinkedIn
+        queue all live on the <strong>Invitations</strong> screen — this is the address book and the
+        history behind it.
       </p>
 
       {flash && <Banner kind={flash.kind}>{flash.text}</Banner>}
@@ -149,14 +116,6 @@ export function Contacts() {
           <a className="btn plain sm" href="/api/contacts/export/csv">
             Export
           </a>
-          <button
-            type="button"
-            className="btn deep sm"
-            disabled={!selected.size}
-            onClick={sendInvites}
-          >
-            Send invite ({selected.size})
-          </button>
         </div>
 
         {loading ? (
@@ -171,38 +130,16 @@ export function Contacts() {
             <table>
               <thead>
                 <tr>
-                  <th style={{ width: 28 }}>
-                    <input
-                      type="checkbox"
-                      aria-label="Select all"
-                      checked={selected.size > 0 && selected.size === contacts.length}
-                      onChange={(e) =>
-                        setSelected(
-                          e.target.checked ? new Set(contacts.map((x) => x.id)) : new Set(),
-                        )
-                      }
-                    />
-                  </th>
                   <th>Contact</th>
                   <th>Source</th>
                   <th>Stage</th>
                   <th>Consent</th>
                   <th>Touches</th>
-                  <th>Next step</th>
                 </tr>
               </thead>
               <tbody>
                 {contacts.map((ct) => (
                   <tr key={ct.id}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        aria-label={`Select ${ct.email}`}
-                        checked={selected.has(ct.id)}
-                        onChange={() => toggle(ct.id)}
-                        disabled={ct.suppressed || ct.has_profile}
-                      />
-                    </td>
                     <td>
                       <button
                         type="button"
@@ -214,10 +151,12 @@ export function Contacts() {
                         }}
                         onClick={() => setDetailId(ct.id)}
                       >
-                        {`${ct.first_name} ${ct.last_name}`.trim() || ct.email}
+                        {`${ct.first_name} ${ct.last_name}`.trim() ||
+                          ct.email ||
+                          "LinkedIn contact"}
                       </button>
                       <div className="sub">
-                        {ct.email}
+                        {ct.email ?? "LinkedIn only"}
                         {ct.linkedin_url ? " · LinkedIn" : ""}
                       </div>
                     </td>
@@ -235,25 +174,6 @@ export function Contacts() {
                       {ct.outreach_count}
                       <div className="sub">{relativeDays(ct.last_outreach_at)}</div>
                     </td>
-                    <td>
-                      {ct.has_profile ? (
-                        <span className="sub">In the pool</span>
-                      ) : ct.suppressed ? (
-                        <span className="sub">Suppressed</span>
-                      ) : (
-                        <div className="btn-row">
-                          {ct.linkedin_url && (
-                            <button
-                              type="button"
-                              className="btn ghost sm"
-                              onClick={() => setLinkedInId(ct.id)}
-                            >
-                              LinkedIn
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -262,33 +182,8 @@ export function Contacts() {
         )}
       </div>
 
-      <div className="grid2" style={{ marginTop: 16 }}>
-        <div className="card">
-          <h3>Invite sequence (email, sent by the app)</h3>
-          <p style={{ fontSize: 13.5 }}>
-            One introduction, then a single follow-up if there's no reply. It stops by itself the
-            moment someone replies, registers or opts out — never more than two messages.
-          </p>
-          <small>
-            Every message says where we got the person's details and carries a one-click opt-out, so
-            the legitimate-interest basis holds up.
-          </small>
-        </div>
-        <div className="card">
-          <h3>LinkedIn queue ({stats?.linkedinQueue ?? 0} waiting)</h3>
-          <p style={{ fontSize: 13.5 }}>
-            The app writes the message; you paste and send it in LinkedIn yourself, then mark it
-            sent here. No automation — that keeps your account safe and stays within LinkedIn's
-            terms.
-          </p>
-        </div>
-      </div>
-
       {detailId && (
         <ContactDetail id={detailId} onClose={() => setDetailId(null)} onChanged={load} />
-      )}
-      {linkedInId && (
-        <LinkedInModal id={linkedInId} onClose={() => setLinkedInId(null)} onChanged={load} />
       )}
       {showImport && (
         <ImportModal

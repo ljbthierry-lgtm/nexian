@@ -22,13 +22,16 @@ interface TaxonomyRow {
 
 /** Staff accounts, the picker lists, and the GDPR housekeeping controls. */
 export function Settings({ me }: { me: Me }) {
-  const [tab, setTab] = useState<"team" | "lists" | "privacy" | "access">("team");
+  const [tab, setTab] = useState<"team" | "lists" | "privacy" | "access" | "extension">("team");
 
+  // A recruiter has no admin controls, but still needs their own extension token
+  // and password, so they get a slimmed Settings rather than a locked door.
   if (me.role !== "admin") {
     return (
       <>
         <h1>Settings</h1>
-        <Banner kind="info">Only administrators can change settings.</Banner>
+        <ExtensionTokens />
+        <ChangePassword />
       </>
     );
   }
@@ -37,7 +40,7 @@ export function Settings({ me }: { me: Me }) {
     <>
       <h1>Settings</h1>
       <div className="btn-row" style={{ marginBottom: 16 }}>
-        {(["team", "lists", "privacy", "access"] as const).map((key) => (
+        {(["team", "lists", "privacy", "access", "extension"] as const).map((key) => (
           <button
             key={key}
             type="button"
@@ -50,7 +53,9 @@ export function Settings({ me }: { me: Me }) {
                 ? "Skills & industries"
                 : key === "privacy"
                   ? "Privacy & retention"
-                  : "Access log"}
+                  : key === "access"
+                    ? "Access log"
+                    : "Browser extension"}
           </button>
         ))}
       </div>
@@ -59,6 +64,7 @@ export function Settings({ me }: { me: Me }) {
       {tab === "lists" && <Lists />}
       {tab === "privacy" && <PrivacyOps />}
       {tab === "access" && <AccessLog />}
+      {tab === "extension" && <ExtensionTokens />}
     </>
   );
 }
@@ -670,6 +676,153 @@ function AccessLog() {
           </div>
         )}
       </div>
+    </>
+  );
+}
+
+interface ExtToken {
+  id: string;
+  label: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked: boolean;
+}
+
+/**
+ * The LinkedIn helper extension needs a personal token to call the app. This
+ * mints one (shown once), lists the active ones, and revokes them. A recruiter
+ * manages only their own — the endpoint is scoped to the signed-in user.
+ */
+function ExtensionTokens() {
+  const [tokens, setTokens] = useState<ExtToken[]>([]);
+  const [fresh, setFresh] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const baseUrl = window.location.origin;
+
+  const load = useCallback(async () => {
+    const res = await api.get<{ tokens: ExtToken[] }>("/api/exttokens");
+    setTokens(res.tokens);
+  }, []);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <>
+      <div className="card">
+        <h3>LinkedIn helper — browser extension</h3>
+        <p style={{ fontSize: 13.5 }}>
+          The extension shows a Nexian button on a LinkedIn profile: one click copies the
+          personalised message for that person, ready to paste, and marks it sent here. It never
+          types or sends anything on LinkedIn itself — that keeps your account safe and within
+          LinkedIn's terms.
+        </p>
+        <p style={{ fontSize: 13.5 }}>
+          To connect it, generate a token below and paste it into the extension's options, along
+          with this address: <strong>{baseUrl}</strong>.
+        </p>
+
+        {fresh && (
+          <Banner kind="warn">
+            <strong>Copy this token now — it is shown only once.</strong>
+            <div
+              style={{
+                marginTop: 8,
+                fontFamily: "Consolas, monospace",
+                wordBreak: "break-all",
+                background: "var(--paper)",
+                padding: "8px 10px",
+                borderRadius: 6,
+              }}
+            >
+              {fresh}
+            </div>
+            <button
+              type="button"
+              className="btn plain sm"
+              style={{ marginTop: 8 }}
+              onClick={() => void navigator.clipboard.writeText(fresh).catch(() => undefined)}
+            >
+              Copy to clipboard
+            </button>
+          </Banner>
+        )}
+
+        <button
+          type="button"
+          className="btn deep"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              const res = await api.post<{ token: string }>("/api/exttokens", {
+                label: "Browser extension",
+              });
+              setFresh(res.token);
+              await load();
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Generate a token
+        </button>
+      </div>
+
+      {tokens.length > 0 && (
+        <div className="card">
+          <h3>Your tokens</h3>
+          <div className="tablewrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Label</th>
+                  <th>Created</th>
+                  <th>Last used</th>
+                  <th>Status</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {tokens.map((t) => (
+                  <tr key={t.id}>
+                    <td>{t.label}</td>
+                    <td className="sub">{formatDate(t.created_at)}</td>
+                    <td className="sub">{t.last_used_at ? formatDate(t.last_used_at) : "never"}</td>
+                    <td>
+                      {t.revoked ? (
+                        <span className="pill neutral">Revoked</span>
+                      ) : (
+                        <span className="pill good">Active</span>
+                      )}
+                    </td>
+                    <td>
+                      {!t.revoked && (
+                        <button
+                          type="button"
+                          className="btn plain sm"
+                          onClick={async () => {
+                            if (
+                              !window.confirm(
+                                "Revoke this token? The extension using it will stop working.",
+                              )
+                            )
+                              return;
+                            await api.post(`/api/exttokens/${t.id}/revoke`);
+                            await load();
+                          }}
+                        >
+                          Revoke
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </>
   );
 }

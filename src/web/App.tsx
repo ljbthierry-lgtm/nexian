@@ -16,7 +16,7 @@ type StaffPage = "invitations" | "contacts" | "pool" | "campaigns" | "preview" |
 
 const NAV: { key: StaffPage; label: string; icon: string; group: string; adminOnly?: boolean }[] = [
   { key: "invitations", label: "Invitations", icon: "➤", group: "Talent" },
-  { key: "contacts", label: "Contacts & outreach", icon: "◧", group: "Talent" },
+  { key: "contacts", label: "Contacts", icon: "◧", group: "Talent" },
   { key: "pool", label: "Talent pool", icon: "▦", group: "Talent" },
   { key: "campaigns", label: "Campaigns", icon: "✉", group: "Talent" },
   // Email previews render through an admin endpoint, so showing the entry to a

@@ -1,0 +1,115 @@
+/* The Nexian button and panel, namespaced so LinkedIn's styles can't touch them
+   and ours can't leak out. Purple to match the app. */
+#nexian-helper-btn {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 2147483000;
+  background: #5a104c;
+  color: #fff;
+  border: 0;
+  border-radius: 999px;
+  padding: 11px 20px;
+  font: 600 14px/1 "Segoe UI", system-ui, sans-serif;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(90, 16, 76, 0.35);
+}
+#nexian-helper-btn:hover {
+  background: #85509b;
+}
+
+#nexian-helper-panel {
+  position: fixed;
+  right: 20px;
+  bottom: 72px;
+  z-index: 2147483000;
+}
+#nexian-helper-panel .nx-card {
+  position: relative;
+  width: 340px;
+  max-width: 90vw;
+  background: #fff;
+  color: #25202b;
+  border: 1px solid #e4dfe9;
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(27, 15, 40, 0.22);
+  padding: 16px 16px 14px;
+  font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
+}
+#nexian-helper-panel .nx-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  border: 0;
+  background: none;
+  font-size: 20px;
+  line-height: 1;
+  color: #8a8194;
+  cursor: pointer;
+}
+#nexian-helper-panel .nx-head {
+  font-weight: 700;
+  font-size: 15px;
+  margin: 0 20px 10px 0;
+}
+#nexian-helper-panel .nx-label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #8a8194;
+  margin: 6px 0 4px;
+}
+#nexian-helper-panel .nx-text {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #e4dfe9;
+  border-radius: 8px;
+  padding: 8px;
+  font: 13px/1.5 "Segoe UI", system-ui, sans-serif;
+  resize: vertical;
+  background: #faf9fb;
+}
+#nexian-helper-panel .nx-row {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+}
+#nexian-helper-panel .nx-btn {
+  border: 1px solid #d7cfe0;
+  background: #fff;
+  color: #5a104c;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font: 600 13px "Segoe UI", system-ui, sans-serif;
+  cursor: pointer;
+}
+#nexian-helper-panel .nx-btn:hover {
+  background: #f3eef7;
+}
+#nexian-helper-panel .nx-deep {
+  background: #5a104c;
+  color: #fff;
+  border-color: #5a104c;
+  width: 100%;
+  margin-top: 4px;
+}
+#nexian-helper-panel .nx-deep[disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+#nexian-helper-panel .nx-muted {
+  color: #6b6474;
+  font-size: 13px;
+  margin: 8px 0 4px;
+}
+#nexian-helper-panel .nx-good {
+  color: #2e7d4f;
+}
+#nexian-helper-panel .nx-warn {
+  color: #a8690f;
+}
+#nexian-helper-panel .nx-sent-state {
+  margin: 8px 0 0;
+  font-size: 13px;
+}

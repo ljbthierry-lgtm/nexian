@@ -12,6 +12,8 @@ import { adminRoutes } from "./modules/admin/routes";
 import { authRoutes } from "./modules/auth/routes";
 import { campaignRoutes } from "./modules/campaigns/routes";
 import { contactRoutes } from "./modules/contacts/routes";
+import { extRoutes } from "./modules/ext/routes";
+import { extTokenRoutes } from "./modules/ext/tokens";
 import { handleInboundEmail } from "./modules/inbound/email";
 import { outreachRoutes } from "./modules/outreach/routes";
 import { poolRoutes } from "./modules/pool/routes";
@@ -79,6 +81,9 @@ app.route("/api/portal", portalRoutes);
 /* ---- delivery webhooks: no session, authenticated by HMAC signature ---- */
 app.route("/api/webhooks", webhookRoutes);
 
+/* ---- browser extension: no session, authenticated by a personal bearer token ---- */
+app.route("/api/ext", extRoutes);
+
 /* ---- everything else under /api requires a staff session ---- */
 app.use("/api/*", async (c, next) => {
   const path = c.req.path;
@@ -88,6 +93,9 @@ app.use("/api/*", async (c, next) => {
     path.startsWith("/api/portal/") ||
     // Signed by the provider instead: a session cookie is meaningless here.
     path.startsWith("/api/webhooks/") ||
+    // Bearer-token authed; note the trailing slash keeps /api/exttokens (session
+    // authed, managed below) out of this bypass.
+    path.startsWith("/api/ext/") ||
     path === "/api/health"
   ) {
     return next();
@@ -97,6 +105,7 @@ app.use("/api/*", async (c, next) => {
 
 app.route("/api/contacts", contactRoutes);
 app.route("/api/outreach", outreachRoutes);
+app.route("/api/exttokens", extTokenRoutes);
 app.route("/api/pool", poolRoutes);
 app.route("/api/campaigns", campaignRoutes);
 app.route("/api/admin", adminRoutes);

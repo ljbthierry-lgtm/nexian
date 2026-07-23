@@ -220,7 +220,7 @@ export function Invitations() {
             <h3>LinkedIn queue</h3>
             <p className="sub">
               {queue.length
-                ? `${queue.length} people to message by hand — the app writes the message, you paste and send it.`
+                ? `${queue.length} people to message by hand — the app writes the message, you paste and send it. Faster with the browser extension (Settings → Browser extension): one click on their LinkedIn profile copies the right message.`
                 : "Nobody waiting. Prospects with a LinkedIn profile and touch budget appear here."}
             </p>
           </div>

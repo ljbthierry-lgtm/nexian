@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Nexian LinkedIn Helper — options</title>
+    <style>
+      body {
+        font: 15px/1.55 "Segoe UI", system-ui, sans-serif;
+        color: #25202b;
+        background: #f4f2f6;
+        margin: 0;
+        padding: 28px;
+      }
+      .card {
+        max-width: 460px;
+        margin: 0 auto;
+        background: #fff;
+        border: 1px solid #e4dfe9;
+        border-radius: 12px;
+        padding: 22px 24px;
+      }
+      h1 {
+        font-size: 19px;
+        margin: 0 0 4px;
+      }
+      p {
+        color: #5c5566;
+        font-size: 13.5px;
+      }
+      label {
+        display: block;
+        font-weight: 600;
+        font-size: 13px;
+        margin: 14px 0 4px;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 9px 11px;
+        border: 1px solid #d7cfe0;
+        border-radius: 8px;
+        font: inherit;
+        font-size: 14px;
+      }
+      button {
+        margin-top: 16px;
+        background: #5a104c;
+        color: #fff;
+        border: 0;
+        border-radius: 8px;
+        padding: 11px 20px;
+        font: 600 14px "Segoe UI", system-ui, sans-serif;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #85509b;
+      }
+      .state {
+        margin-top: 14px;
+        font-size: 13.5px;
+      }
+      .good {
+        color: #2e7d4f;
+      }
+      .warn {
+        color: #a8690f;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Nexian LinkedIn Helper</h1>
+      <p>
+        Connect the extension to your Nexian talent pool. Generate a token in the app under
+        <strong>Settings → Browser extension</strong>, then paste it here with your Nexian address.
+      </p>
+
+      <label for="baseUrl">Nexian address</label>
+      <input id="baseUrl" placeholder="https://nexian-talent-pool.ljbthierry.workers.dev" />
+
+      <label for="token">Your token</label>
+      <input id="token" placeholder="nxext_…" />
+
+      <button id="save">Save & test connection</button>
+      <div class="state" id="state"></div>
+    </div>
+    <script src="options.js"></script>
+  </body>
+</html>

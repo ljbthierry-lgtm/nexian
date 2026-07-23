@@ -45,10 +45,42 @@ This is the part to understand before changing anything.
 
 ## LinkedIn
 
-LinkedIn has no API for messaging people, and automating its interface breaks
-their terms and risks the sender's own account. So the app writes the message
-and tracks who received one; a human pastes and sends it. Marking it sent counts
-as one of the two allowed touches, so email and LinkedIn share a single budget.
+LinkedIn has no compliant API for messaging arbitrary people, and automating its
+interface breaks their terms and risks the sender's own account. So the app
+writes the message and tracks who received one; a human pastes and sends it.
+Marking it sent counts as one of the two allowed touches, so email and LinkedIn
+share a single budget.
+
+The **browser extension** in `extension/` makes this one click: on a LinkedIn
+profile it copies the prepared, personalised message for that person and records
+the touch. It never types into or sends from LinkedIn — that line is the whole
+compliance story. See `extension/README.md`. It authenticates with a personal
+bearer token (`api_tokens`), minted per staff member under **Settings → Browser
+extension**, and calls `/api/ext/*` (bearer-authed, outside the session guard).
+
+## The two outreach screens
+
+- **Invitations** is the campaign desk: import a list, run the paced email
+  **wave**, work the **LinkedIn queue**, see the funnel (not invited → invited →
+  registered → declined), record replies. This is where sending happens.
+- **Contacts** is the record book: the full row for everyone, notes, consent
+  history, per-record access log, import and CSV export. No sending controls —
+  they were deliberately moved to Invitations so the two screens stop
+  overlapping.
+
+## Deliverability, replies, alerts
+
+- **Bounces/complaints** arrive by signed Resend webhook (`/api/webhooks/resend`,
+  HMAC-verified, replay-guarded, idempotent). A hard bounce marks the address
+  undeliverable and stops email but **never suppresses** — a dead mailbox is a
+  fact, not a choice. A spam complaint **does** suppress permanently. See
+  `lib/deliverability.ts`; `EMAILABLE_SQL` / `isEmailable` gate every send path.
+- **Replies** stop the sequence. Recorded by hand today (interested / not now /
+  not interested); an inbound Email Worker (`modules/inbound/email.ts`) does it
+  automatically once a real domain routes mail to the Worker — it refuses to
+  treat an out-of-office as a reply.
+- **Bulk-export alerting** (`lib/alerts.ts`): a large or repeated export raises a
+  DB-first, email-second alert shown on Settings → Access log.
 
 ## Layout
 
@@ -65,15 +97,27 @@ src/worker/
     publicsite/      registration, "email me my link"
     portal/          the freelancer's own profile, CV, export, delete
     actions/         /a/:token landing pages for email buttons
-    contacts/        the CRM: list, import, notes, suppression
-    outreach/        invite sequence + LinkedIn queue
+    contacts/        the record book: list, import, notes, suppression, CSV
+    outreach/        invite wave, follow-ups, LinkedIn queue, send.ts (shared)
     pool/            the talent pool table and its filters
     campaigns/       compose, preview audience, send
-    admin/           team, taxonomy, retention, email log
-    notifications/   Resend client, templates, action tokens
+    admin/           team, taxonomy, retention, email log, access log, alerts,
+                     extension-token management, email/portal previews
+    ext/             browser-extension API (bearer) + token management (session)
+    inbound/         incoming-email reply detection (dormant until domain routes)
+    notifications/   Resend client, webhook, templates, action tokens
+  lib/               ...also: deliverability, alerts, mfa, apiToken, accessLog,
+                     linkedinKey, inviteStatus, profileFields, webhookSignature,
+                     csrf, replyMatch, labels
+extension/           MV3 Chrome/Edge extension (manifest, background, content,
+                     options) — the compliant LinkedIn one-click helper
 src/web/             React SPA (staff back office + public pages)
 test/                unit tests for the rules that must not drift
 ```
+
+`src/web/profileFields.ts` mirrors `src/worker/lib/profileFields.ts` (language
+levels, Belgian provinces + remote, work regimes, notice periods). A parity test
+fails if the two drift, so a form can never offer a value the server then drops.
 
 Two identities, two cookies: `nx_session` for staff, `nx_portal` for a
 freelancer who followed a magic link. A portal cookie can never satisfy a back

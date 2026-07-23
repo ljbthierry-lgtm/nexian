@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Nexian LinkedIn Helper",
+  "version": "1.0.0",
+  "description": "On a LinkedIn profile, copy the personalised Nexian invitation for that person and record that you sent it. Prepares only — it never sends on LinkedIn.",
+  "permissions": ["storage", "clipboardWrite", "activeTab"],
+  "host_permissions": [
+    "https://nexian-talent-pool.ljbthierry.workers.dev/*",
+    "https://*.linkedin.com/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "options_page": "options.html",
+  "action": { "default_title": "Nexian LinkedIn Helper", "default_icon": "icons/icon48.png" },
+  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
+  "content_scripts": [
+    {
+      "matches": ["https://*.linkedin.com/in/*", "https://*.linkedin.com/sales/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
