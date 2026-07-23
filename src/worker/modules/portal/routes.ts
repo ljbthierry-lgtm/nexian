@@ -30,6 +30,7 @@ import {
   cleanNoticePeriod,
   cleanWorkRegime,
   languagesFromLevels,
+  mobilityHasRemote,
 } from "../../lib/profileFields";
 import { requirePortal } from "../../middleware/auth";
 
@@ -188,7 +189,12 @@ portalRoutes.patch("/profile", async (c) => {
   } else if (input.languages !== undefined) {
     set("languages", serialiseLabels(input.languages));
   }
-  if (input.mobility !== undefined) set("mobility", JSON.stringify(cleanMobility(input.mobility)));
+  if (input.mobility !== undefined) {
+    const mob = cleanMobility(input.mobility);
+    set("mobility", JSON.stringify(mob));
+    // Fully-remote lives in mobility, so keep remote_ok in step with it.
+    set("remote_ok", mobilityHasRemote(mob) ? 1 : 0);
+  }
   if (input.work_regime !== undefined) {
     set("work_regime", JSON.stringify(cleanWorkRegime(input.work_regime)));
   }

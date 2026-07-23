@@ -22,6 +22,7 @@ import {
   cleanNoticePeriod,
   cleanWorkRegime,
   languagesFromLevels,
+  mobilityHasRemote,
 } from "../../lib/profileFields";
 import { badRequest, tooManyRequests } from "../../lib/errors";
 import { log } from "../../lib/log";
@@ -152,6 +153,9 @@ publicRoutes.post("/register", async (c) => {
   const mobility = cleanMobility(input.mobility);
   const workRegime = cleanWorkRegime(input.work_regime);
   const noticePeriod = cleanNoticePeriod(input.notice_period);
+  // "Fully remote" is one of the mobility answers now, so remote_ok is derived
+  // from it rather than a separate checkbox.
+  const remoteOk = mobilityHasRemote(mobility) || input.remote_ok === true;
   if (cv && !isAcceptableCv(cv.name, cv.type)) {
     throw badRequest("Please upload a PDF or Word document as your CV.");
   }
@@ -339,7 +343,7 @@ publicRoutes.post("/register", async (c) => {
     input.availability,
     input.available_from ?? null,
     input.location ?? null,
-    input.remote_ok ? 1 : 0,
+    remoteOk ? 1 : 0,
     input.freelancer_note ?? null,
   );
 

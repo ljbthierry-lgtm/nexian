@@ -1,5 +1,5 @@
 /** Small shared pieces used across pages. */
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { Availability, Consents, Stage } from "./api";
 
 export function Banner({
@@ -35,7 +35,156 @@ export function Stat({
   );
 }
 
-/** Multi-select chip group — the picker used for skills, industries and languages. */
+/**
+ * A searchable multi-select for long option lists (skills, industries,
+ * certifications). Selected values show as removable tags; typing filters a
+ * dropdown of the rest. `allowCustom` decides whether a value not in the list
+ * can be added — off for a closed vocabulary like industries, on where a
+ * freelancer may legitimately hold something niche.
+ */
+export function SearchSelect({
+  options,
+  selected,
+  onChange,
+  allowCustom,
+  placeholder,
+}: {
+  options: string[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+  allowCustom?: boolean;
+  placeholder?: string;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  // Close when focus leaves the whole control.
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const q = query.trim().toLowerCase();
+  const matches = options
+    .filter((o) => !selected.includes(o) && (!q || o.toLowerCase().includes(q)))
+    .slice(0, 50);
+  const exact =
+    options.some((o) => o.toLowerCase() === q) || selected.some((s) => s.toLowerCase() === q);
+  const canAddCustom = Boolean(allowCustom) && q.length > 0 && !exact;
+
+  const add = (label: string) => {
+    const v = label.trim();
+    if (v && !selected.includes(v)) onChange([...selected, v]);
+    setQuery("");
+    setOpen(true);
+  };
+  const remove = (label: string) => onChange(selected.filter((s) => s !== label));
+
+  return (
+    <div className="search-select" ref={boxRef}>
+      {selected.length > 0 && (
+        <div className="chips" style={{ marginBottom: 6 }}>
+          {selected.map((label) => (
+            <span key={label} className="chip on">
+              {label}
+              <button
+                type="button"
+                className="chip-x"
+                aria-label={`Remove ${label}`}
+                onClick={() => remove(label)}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <input
+        type="text"
+        value={query}
+        placeholder={placeholder ?? "Search…"}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            if (matches[0]) add(matches[0]);
+            else if (canAddCustom) add(query);
+          } else if (e.key === "Escape") {
+            setOpen(false);
+          }
+        }}
+      />
+      {open && (matches.length > 0 || canAddCustom) && (
+        <div className="ss-menu" role="listbox">
+          {matches.map((o) => (
+            <button key={o} type="button" className="ss-option" onClick={() => add(o)}>
+              {o}
+            </button>
+          ))}
+          {canAddCustom && (
+            <button type="button" className="ss-option ss-add" onClick={() => add(query)}>
+              Add “{query.trim()}”
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The "where can you work?" picker: mobility areas as toggle chips, grouped by
+ * region so the province list stays scannable, with "Fully remote" as its own
+ * group because it is a mobility answer as much as a place.
+ */
+export function MobilityPicker({
+  areas,
+  groups,
+  selected,
+  onChange,
+}: {
+  areas: readonly { code: string; label: string; group: string }[];
+  groups: readonly string[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const toggle = (code: string) =>
+    onChange(selected.includes(code) ? selected.filter((c) => c !== code) : [...selected, code]);
+  return (
+    <div>
+      {groups.map((group) => (
+        <div key={group} className="region-group">
+          <p className="region-head">{group}</p>
+          <div className="chips">
+            {areas
+              .filter((a) => a.group === group)
+              .map((a) => (
+                <button
+                  key={a.code}
+                  type="button"
+                  className={`chip ${selected.includes(a.code) ? "on" : ""}`}
+                  aria-pressed={selected.includes(a.code)}
+                  onClick={() => toggle(a.code)}
+                >
+                  {a.label}
+                </button>
+              ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ChipPicker({
   options,
   selected,

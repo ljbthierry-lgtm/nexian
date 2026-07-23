@@ -1,8 +1,9 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { ApiError, type Availability, type Taxonomy, api } from "../api";
-import { Banner, ChipPicker } from "../components";
+import { Banner, MobilityPicker, SearchSelect } from "../components";
 import {
   BELGIAN_REGIONS,
+  REGION_GROUPS,
   GRADED_LANGUAGES,
   LANGUAGE_LEVELS,
   LANGUAGE_LEVEL_LABEL,
@@ -60,7 +61,6 @@ export function Join() {
     available_from: "",
     notice_period: "",
     location: "",
-    remote_ok: false,
     freelancer_note: "",
   });
   const [skills, setSkills] = useState<string[]>([]);
@@ -145,7 +145,6 @@ export function Join() {
           availability: form.availability,
           available_from: form.availability === "from_date" ? form.available_from : undefined,
           location: form.location.trim() || undefined,
-          remote_ok: form.remote_ok,
           freelancer_note: form.freelancer_note.trim() || undefined,
           consent_data_processing: consent.data,
           consent_mission_alerts: consent.alerts,
@@ -346,35 +345,37 @@ export function Join() {
 
         <div className="field">
           <label>
-            Skills <span className="hint">— pick all that apply</span>
+            Skills <span className="hint">— search and pick all that apply</span>
           </label>
-          <ChipPicker
+          <SearchSelect
             options={tax?.skills ?? []}
             selected={skills}
             onChange={setSkills}
             allowCustom
+            placeholder="Search skills…"
           />
         </div>
 
         <div className="field">
           <label>Industries</label>
-          <ChipPicker
+          <SearchSelect
             options={tax?.industries ?? []}
             selected={industries}
             onChange={setIndustries}
-            allowCustom
+            placeholder="Search industries…"
           />
         </div>
 
         <div className="field">
           <label>
-            Certifications <span className="hint">— pick any you hold, or add your own</span>
+            Certifications <span className="hint">— search the list, or add your own</span>
           </label>
-          <ChipPicker
+          <SearchSelect
             options={tax?.certifications ?? []}
             selected={certifications}
             onChange={setCertifications}
             allowCustom
+            placeholder="Search certifications…"
           />
         </div>
 
@@ -413,42 +414,28 @@ export function Join() {
           <label style={{ marginTop: 12 }}>
             Other languages <span className="hint">(optional)</span>
           </label>
-          <ChipPicker
+          <SearchSelect
             options={(tax?.languages ?? []).filter(
               (l) => !GRADED_LANGUAGES.some((g) => g.label === l),
             )}
             selected={languages}
             onChange={setLanguages}
             allowCustom
+            placeholder="Search languages…"
           />
         </div>
 
         <div className="field">
           <label>
-            Where can you work? <span className="hint">— Belgian regions you'll travel to</span>
+            Where can you work?{" "}
+            <span className="hint">— the areas you'll travel to, and remote</span>
           </label>
-          <div className="chips">
-            {BELGIAN_REGIONS.map((region) => {
-              const on = mobility.includes(region.code);
-              return (
-                <button
-                  key={region.code}
-                  type="button"
-                  className={`chip ${on ? "on" : ""}`}
-                  aria-pressed={on}
-                  onClick={() =>
-                    setMobility((prev) =>
-                      prev.includes(region.code)
-                        ? prev.filter((c) => c !== region.code)
-                        : [...prev, region.code],
-                    )
-                  }
-                >
-                  {region.label}
-                </button>
-              );
-            })}
-          </div>
+          <MobilityPicker
+            areas={BELGIAN_REGIONS}
+            groups={REGION_GROUPS}
+            selected={mobility}
+            onChange={setMobility}
+          />
         </div>
 
         <div className="grid2">
@@ -544,15 +531,6 @@ export function Join() {
             />
           </div>
         </div>
-
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={form.remote_ok}
-            onChange={(e) => set("remote_ok", e.target.checked)}
-          />
-          <span>I'm open to fully remote missions</span>
-        </label>
 
         <div className="field">
           <label htmlFor="cv">

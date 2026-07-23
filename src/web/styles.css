@@ -523,6 +523,74 @@ input[type="checkbox"] {
   outline-offset: 1px;
 }
 
+/* Searchable multi-select (skills, industries, certifications). */
+.search-select {
+  position: relative;
+}
+.chip .chip-x {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  margin-left: 6px;
+  padding: 0;
+}
+.chip .chip-x:hover {
+  color: var(--hi);
+}
+.ss-menu {
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  box-shadow: 0 12px 30px rgba(27, 15, 40, 0.14);
+}
+.ss-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.ss-option:hover,
+.ss-option:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+.ss-add {
+  color: var(--accent-deep);
+  font-weight: 600;
+  border-top: 1px solid var(--line);
+}
+/* Grouped mobility: a header label above each cluster of region chips. */
+.region-group {
+  margin-top: 10px;
+}
+.region-group:first-child {
+  margin-top: 0;
+}
+.region-group .region-head {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
 /* Language proficiency grid: language name beside a level selector. */
 .lang-grid {
   display: grid;

@@ -17,6 +17,7 @@ import {
   WORK_REGIMES,
   cleanLanguageLevels,
   cleanMobility,
+  mobilityHasRemote,
   cleanNoticePeriod,
   cleanWorkRegime,
   languagesFromLevels,
@@ -57,21 +58,38 @@ describe("the flat languages list is derived from the grades", () => {
   });
 });
 
-describe("mobility across the Belgian regions", () => {
-  it("keeps only real region codes, de-duplicated", () => {
-    expect(cleanMobility(["brussels", "flanders", "brussels", "atlantis"])).toEqual([
-      "brussels",
-      "flanders",
+describe("mobility across the Belgian provinces", () => {
+  it("keeps only real area codes, de-duplicated", () => {
+    expect(cleanMobility(["antwerp", "liege", "antwerp", "atlantis", "flanders"])).toEqual([
+      "antwerp",
+      "liege",
     ]);
   });
 
+  it("accepts fully-remote as a mobility area, not a separate flag", () => {
+    expect(cleanMobility(["remote", "namur"])).toEqual(["remote", "namur"]);
+    expect(mobilityHasRemote(["remote", "namur"])).toBe(true);
+    expect(mobilityHasRemote(["namur"])).toBe(false);
+  });
+
+  it("no longer accepts the old whole-region codes", () => {
+    // Flanders/Wallonia were too coarse; they are provinces now.
+    expect(cleanMobility(["flanders", "wallonia"])).toEqual([]);
+  });
+
+  it("covers Brussels, all ten provinces, and remote", () => {
+    expect(BELGIAN_REGIONS).toHaveLength(12);
+    const groups = new Set(BELGIAN_REGIONS.map((r) => r.group));
+    expect([...groups]).toEqual(["Brussels", "Flanders", "Wallonia", "Remote"]);
+  });
+
   it("returns an empty list for anything that is not an array of codes", () => {
-    for (const junk of [null, "brussels", 3, {}, ["", 5]]) {
+    for (const junk of [null, "antwerp", 3, {}, ["", 5]]) {
       expect(cleanMobility(junk)).toEqual([]);
     }
   });
 
-  it("labels every region", () => {
+  it("labels every area", () => {
     for (const region of BELGIAN_REGIONS) {
       expect(regionLabel(region.code)).toBe(region.label);
     }

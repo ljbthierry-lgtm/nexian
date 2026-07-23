@@ -61,17 +61,32 @@ export function languagesFromLevels(
 }
 
 /**
- * The Belgian regions, for mobility — where a freelancer will physically work.
- * The three official regions, matching how clients describe a site's location.
- * (Provinces would be finer; kept to regions unless the business wants more.)
+ * Where a freelancer will work: the Belgian provinces (Flanders and Wallonia are
+ * too large to match a client site usefully), Brussels, and "Fully remote" —
+ * which is a mobility answer as much as a place, so it lives in the same list.
+ * `group` drives the headers on the form.
  */
 export const BELGIAN_REGIONS = [
-  { code: "brussels", label: "Brussels-Capital" },
-  { code: "flanders", label: "Flanders" },
-  { code: "wallonia", label: "Wallonia" },
+  { code: "brussels", label: "Brussels-Capital", group: "Brussels" },
+  { code: "antwerp", label: "Antwerp", group: "Flanders" },
+  { code: "east_flanders", label: "East Flanders", group: "Flanders" },
+  { code: "west_flanders", label: "West Flanders", group: "Flanders" },
+  { code: "flemish_brabant", label: "Flemish Brabant", group: "Flanders" },
+  { code: "limburg", label: "Limburg", group: "Flanders" },
+  { code: "walloon_brabant", label: "Walloon Brabant", group: "Wallonia" },
+  { code: "hainaut", label: "Hainaut", group: "Wallonia" },
+  { code: "liege", label: "Liège", group: "Wallonia" },
+  { code: "luxembourg", label: "Luxembourg", group: "Wallonia" },
+  { code: "namur", label: "Namur", group: "Wallonia" },
+  { code: "remote", label: "Fully remote", group: "Remote" },
 ] as const;
 
 export type RegionCode = (typeof BELGIAN_REGIONS)[number]["code"];
+
+/** True when the person's mobility includes fully-remote work. */
+export function mobilityHasRemote(mobility: string[]): boolean {
+  return mobility.includes("remote");
+}
 
 const REGION_CODES = new Set(BELGIAN_REGIONS.map((r) => r.code));
 

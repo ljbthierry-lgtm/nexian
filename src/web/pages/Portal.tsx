@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, type Availability, type Consents, type Taxonomy, api } from "../api";
-import { AvailabilityPill, Banner, ChipPicker, formatDate, relativeDays } from "../components";
+import {
+  AvailabilityPill,
+  Banner,
+  MobilityPicker,
+  SearchSelect,
+  formatDate,
+  relativeDays,
+} from "../components";
 import {
   BELGIAN_REGIONS,
+  REGION_GROUPS,
   GRADED_LANGUAGES,
   LANGUAGE_LEVELS,
   LANGUAGE_LEVEL_LABEL,
@@ -498,7 +506,6 @@ function EditForm({
     available_from: profile.available_from ?? "",
     notice_period: profile.notice_period ?? "",
     location: profile.location ?? "",
-    remote_ok: profile.remote_ok,
     freelancer_note: profile.freelancer_note ?? "",
   });
   const [skills, setSkills] = useState(profile.skills);
@@ -527,7 +534,6 @@ function EditForm({
           availability: f.availability,
           available_from: f.availability === "from_date" ? f.available_from || null : null,
           location: f.location || null,
-          remote_ok: f.remote_ok,
           freelancer_note: f.freelancer_note || null,
           skills,
           industries,
@@ -637,29 +643,31 @@ function EditForm({
 
       <div className="field">
         <label>Skills</label>
-        <ChipPicker
+        <SearchSelect
           options={tax?.skills ?? []}
           selected={skills}
           onChange={setSkills}
           allowCustom
+          placeholder="Search skills…"
         />
       </div>
       <div className="field">
         <label>Industries</label>
-        <ChipPicker
+        <SearchSelect
           options={tax?.industries ?? []}
           selected={industries}
           onChange={setIndustries}
-          allowCustom
+          placeholder="Search industries…"
         />
       </div>
       <div className="field">
         <label>Certifications</label>
-        <ChipPicker
+        <SearchSelect
           options={tax?.certifications ?? []}
           selected={certifications}
           onChange={setCertifications}
           allowCustom
+          placeholder="Search certifications…"
         />
       </div>
       <div className="field">
@@ -692,40 +700,25 @@ function EditForm({
           ))}
         </div>
         <label style={{ marginTop: 12 }}>Other languages</label>
-        <ChipPicker
+        <SearchSelect
           options={(tax?.languages ?? []).filter(
             (l) => !GRADED_LANGUAGES.some((g) => g.label === l),
           )}
           selected={languages}
           onChange={setLanguages}
           allowCustom
+          placeholder="Search languages…"
         />
       </div>
 
       <div className="field">
-        <label>Where can you work? (Belgian regions)</label>
-        <div className="chips">
-          {BELGIAN_REGIONS.map((region) => {
-            const on = mobility.includes(region.code);
-            return (
-              <button
-                key={region.code}
-                type="button"
-                className={`chip ${on ? "on" : ""}`}
-                aria-pressed={on}
-                onClick={() =>
-                  setMobility((prev) =>
-                    prev.includes(region.code)
-                      ? prev.filter((c) => c !== region.code)
-                      : [...prev, region.code],
-                  )
-                }
-              >
-                {region.label}
-              </button>
-            );
-          })}
-        </div>
+        <label>Where can you work?</label>
+        <MobilityPicker
+          areas={BELGIAN_REGIONS}
+          groups={REGION_GROUPS}
+          selected={mobility}
+          onChange={setMobility}
+        />
       </div>
 
       <div className="grid2">
@@ -768,15 +761,6 @@ function EditForm({
           </select>
         </div>
       </div>
-
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={f.remote_ok}
-          onChange={(e) => setF({ ...f, remote_ok: e.target.checked })}
-        />
-        <span>I'm open to fully remote missions</span>
-      </label>
 
       <div className="field">
         <label htmlFor="e-note">Anything else we should know?</label>
