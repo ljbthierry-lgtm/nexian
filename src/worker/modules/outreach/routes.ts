@@ -11,6 +11,7 @@ import { resolveBaseUrl } from "../../lib/baseUrl";
 import { all, first, run } from "../../lib/db";
 import { notFound } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
+import { createActionToken } from "../notifications/tokens";
 import { decideOutreach } from "./eligibility";
 import { connectionNote, directMessage } from "./linkedin";
 import {
@@ -92,11 +93,18 @@ outreachRoutes.get("/linkedin/:id", async (c) => {
 
   const baseUrl = await resolveBaseUrl(c.env);
   const user = c.get("user");
+  // Same personal link as the email channel, marked as LinkedIn — so even a
+  // hand-pasted InMail is attributable when the click or registration arrives.
+  const inviteToken = await createActionToken(c.env.DB, {
+    purpose: "join_prefill",
+    contactId: row.id,
+    payload: { channel: "linkedin" },
+  });
   const input = {
     firstName: row.first_name,
     companyName: c.env.COMPANY_NAME,
     senderName: user.name,
-    registerUrl: `${baseUrl}/join`,
+    registerUrl: `${baseUrl}/join?invite=${inviteToken}`,
     focus: c.req.query("focus") ?? undefined,
   };
   const decision = decideOutreach(toCandidate(row), policyOf(c.env));

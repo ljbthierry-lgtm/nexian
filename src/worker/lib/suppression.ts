@@ -59,6 +59,14 @@ export async function unsuppressEmail(db: D1Database, email: string): Promise<vo
   await run(db, `DELETE FROM suppression_list WHERE email_hash = ?`, await emailHash(email));
 }
 
+export async function unsuppressLinkedin(db: D1Database, linkedinKey: string): Promise<void> {
+  await run(
+    db,
+    `DELETE FROM suppression_list WHERE email_hash = ?`,
+    await linkedinHash(linkedinKey),
+  );
+}
+
 export async function isSuppressed(db: D1Database, email: string): Promise<boolean> {
   const row = await first<{ email_hash: string }>(
     db,

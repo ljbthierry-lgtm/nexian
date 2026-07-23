@@ -9,11 +9,33 @@ import { Banner, ChipPicker } from "../components";
  * first is required; the two marketing ones are genuinely optional, which is
  * what makes the consent valid.
  */
+interface PrefillResponse {
+  valid: boolean;
+  alreadyRegistered?: boolean;
+  first_name?: string;
+  email?: string | null;
+  prefill?: {
+    first_name: string;
+    last_name: string;
+    email: string | null;
+    linkedin_url: string | null;
+  };
+}
+
+/** The personalised-invitation token, read once from ?invite= in the URL. */
+function inviteTokenFromUrl(): string | null {
+  const token = new URLSearchParams(window.location.search).get("invite");
+  return token && /^[0-9a-f]{64}$/.test(token) ? token : null;
+}
+
 export function Join() {
   const [tax, setTax] = useState<Taxonomy | null>(null);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [invite] = useState<string | null>(inviteTokenFromUrl);
+  const [prefilled, setPrefilled] = useState(false);
+  const [alreadyRegistered, setAlreadyRegistered] = useState(false);
 
   const [form, setForm] = useState({
     first_name: "",
@@ -46,6 +68,33 @@ export function Join() {
       .then(setTax)
       .catch(() => undefined);
   }, []);
+
+  // Arrived through a personalised invitation: fill in what we already hold, so
+  // they check and complete instead of retyping. A dead or foreign token
+  // degrades silently to the blank form — the link must never scare anyone off.
+  useEffect(() => {
+    if (!invite) return;
+    api
+      .get<PrefillResponse>(`/api/public/join-prefill?token=${invite}`)
+      .then((res) => {
+        if (!res.valid) return;
+        if (res.alreadyRegistered) {
+          setAlreadyRegistered(true);
+          if (res.email) setLinkEmail(res.email);
+          return;
+        }
+        if (!res.prefill) return;
+        setForm((f) => ({
+          ...f,
+          first_name: f.first_name || res.prefill!.first_name,
+          last_name: f.last_name || res.prefill!.last_name,
+          email: f.email || (res.prefill!.email ?? ""),
+          linkedin_url: f.linkedin_url || (res.prefill!.linkedin_url ?? ""),
+        }));
+        setPrefilled(true);
+      })
+      .catch(() => undefined);
+  }, [invite]);
 
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
@@ -80,6 +129,7 @@ export function Join() {
           consent_data_processing: consent.data,
           consent_mission_alerts: consent.alerts,
           consent_news: consent.news,
+          invite: invite ?? undefined,
         },
         cv,
       );
@@ -119,6 +169,19 @@ export function Join() {
 
   return (
     <Shell>
+      {prefilled && (
+        <Banner kind="info">
+          Welcome{form.first_name ? `, ${form.first_name}` : ""} — we've filled in what we already
+          have. Please check it, complete the rest, and choose your preferences below. Nothing is
+          saved until you submit.
+        </Banner>
+      )}
+      {alreadyRegistered && (
+        <Banner kind="info">
+          You're already in our pool. Use the “Already registered?” box to get a secure link to your
+          existing profile rather than creating a second one.
+        </Banner>
+      )}
       <div className="hero">
         <div>
           <div className="eyebrow">Freelance network</div>

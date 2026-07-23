@@ -10,7 +10,16 @@
 import { randomToken, sha256Hex } from "../../lib/crypto";
 import { first, run } from "../../lib/db";
 
-export type TokenPurpose = "portal_link" | "confirm_availability" | "unsubscribe" | "set_password";
+export type TokenPurpose =
+  "portal_link" | "confirm_availability" | "unsubscribe" | "set_password" | "join_prefill";
+
+/**
+ * Reusable tokens: unsubscribe (an old email must always be able to opt out)
+ * and join_prefill (the invitation link is opened, read, and come back to —
+ * burning it on first view would break the person it was made for; it is
+ * revoked explicitly when they register).
+ */
+const REUSABLE_PURPOSES: ReadonlySet<TokenPurpose> = new Set(["unsubscribe", "join_prefill"]);
 
 export interface ActionTokenRow {
   token_hash: string;
@@ -28,6 +37,8 @@ const DEFAULT_TTL_DAYS: Record<TokenPurpose, number> = {
   confirm_availability: 60,
   unsubscribe: 365,
   set_password: 14,
+  // Long enough for a paced wave plus a LinkedIn queue worked over weeks.
+  join_prefill: 60,
 };
 
 export async function createActionToken(
@@ -53,7 +64,7 @@ export async function createActionToken(
     opts.contactId ?? null,
     opts.userId ?? null,
     JSON.stringify(opts.payload ?? {}),
-    opts.purpose === "unsubscribe" ? 0 : 1,
+    REUSABLE_PURPOSES.has(opts.purpose) ? 0 : 1,
     expires,
   );
   return raw;

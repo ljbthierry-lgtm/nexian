@@ -100,7 +100,15 @@ export async function sendOutreachTo(
     contactId: row.id,
     payload: { scope: "all" },
   });
-  const registerUrl = `${baseUrl}/join`;
+  // The personal link: opens the registration page with this person's known
+  // details pre-filled, and attributes the click and the registration to this
+  // contact and channel. Reusable until they register, then revoked.
+  const inviteToken = await createActionToken(env.DB, {
+    purpose: "join_prefill",
+    contactId: row.id,
+    payload: { channel: "email" },
+  });
+  const registerUrl = `${baseUrl}/join?invite=${inviteToken}`;
   const optOutUrl = `${baseUrl}/a/${optOutToken}`;
 
   const mail =
