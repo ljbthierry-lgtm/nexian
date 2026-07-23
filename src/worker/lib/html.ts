@@ -47,7 +47,7 @@ export function actionPage(o: ActionPageOptions): string {
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(o.title)}</title>
-<link rel="icon" href="/favicon.png">
+<link rel="icon" type="image/png" href="/favicon-tiles.png">
 <style>
   :root{color-scheme:light}
   body{margin:0;background:#f4f2f6;color:#25202b;
