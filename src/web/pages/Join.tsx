@@ -1,6 +1,13 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { ApiError, type Availability, type Taxonomy, api } from "../api";
 import { Banner, ChipPicker } from "../components";
+import {
+  BELGIAN_REGIONS,
+  GRADED_LANGUAGES,
+  LANGUAGE_LEVELS,
+  LANGUAGE_LEVEL_LABEL,
+  type LanguageLevel,
+} from "../profileFields";
 
 /**
  * The public registration form — the link we put in every outreach message.
@@ -45,6 +52,7 @@ export function Join() {
     linkedin_url: "",
     headline: "",
     years_experience: "",
+    years_relevant: "",
     daily_rate: "",
     availability: "now" as Availability,
     available_from: "",
@@ -55,6 +63,8 @@ export function Join() {
   const [skills, setSkills] = useState<string[]>([]);
   const [industries, setIndustries] = useState<string[]>([]);
   const [languages, setLanguages] = useState<string[]>([]);
+  const [langLevels, setLangLevels] = useState<Record<string, LanguageLevel>>({});
+  const [mobility, setMobility] = useState<string[]>([]);
   const [consent, setConsent] = useState({ data: false, alerts: false, news: false });
 
   const [cv, setCv] = useState<File | null>(null);
@@ -117,6 +127,9 @@ export function Join() {
           linkedin_url: form.linkedin_url.trim() || undefined,
           headline: form.headline.trim() || undefined,
           years_experience: form.years_experience ? Number(form.years_experience) : undefined,
+          years_relevant: form.years_relevant ? Number(form.years_relevant) : undefined,
+          language_levels: langLevels,
+          mobility,
           skills,
           industries,
           languages,
@@ -271,7 +284,20 @@ export function Join() {
             <input id="ph" value={form.phone} onChange={(e) => set("phone", e.target.value)} />
           </div>
           <div className="field">
-            <label htmlFor="yr">Years of experience</label>
+            <label htmlFor="li">
+              LinkedIn <span className="hint">(optional)</span>
+            </label>
+            <input
+              id="li"
+              value={form.linkedin_url}
+              onChange={(e) => set("linkedin_url", e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="grid2">
+          <div className="field">
+            <label htmlFor="yr">Years of experience (total)</label>
             <input
               id="yr"
               type="number"
@@ -282,13 +308,17 @@ export function Join() {
             />
           </div>
           <div className="field">
-            <label htmlFor="li">
-              LinkedIn <span className="hint">(optional)</span>
+            <label htmlFor="yrr">
+              Years of relevant experience{" "}
+              <span className="hint">— in the kind of work you'd take on</span>
             </label>
             <input
-              id="li"
-              value={form.linkedin_url}
-              onChange={(e) => set("linkedin_url", e.target.value)}
+              id="yrr"
+              type="number"
+              min={0}
+              max={70}
+              value={form.years_relevant}
+              onChange={(e) => set("years_relevant", e.target.value)}
             />
           </div>
         </div>
@@ -330,12 +360,75 @@ export function Join() {
 
         <div className="field">
           <label>Languages</label>
+          <p className="hint" style={{ margin: "0 0 8px" }}>
+            Grade the three we work in. Leave a language blank if you don't use it.
+          </p>
+          <div className="lang-grid">
+            {GRADED_LANGUAGES.map((lang) => (
+              <div key={lang.key} className="lang-row">
+                <span className="lang-name">{lang.label}</span>
+                <select
+                  aria-label={`${lang.label} level`}
+                  value={langLevels[lang.key] ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setLangLevels((prev) => {
+                      const next = { ...prev };
+                      if (v) next[lang.key] = v as LanguageLevel;
+                      else delete next[lang.key];
+                      return next;
+                    });
+                  }}
+                >
+                  <option value="">Not applicable</option>
+                  {LANGUAGE_LEVELS.map((level) => (
+                    <option key={level} value={level}>
+                      {LANGUAGE_LEVEL_LABEL[level]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </div>
+          <label style={{ marginTop: 12 }}>
+            Other languages <span className="hint">(optional)</span>
+          </label>
           <ChipPicker
-            options={tax?.languages ?? []}
+            options={(tax?.languages ?? []).filter(
+              (l) => !GRADED_LANGUAGES.some((g) => g.label === l),
+            )}
             selected={languages}
             onChange={setLanguages}
             allowCustom
           />
+        </div>
+
+        <div className="field">
+          <label>
+            Where can you work? <span className="hint">— Belgian regions you'll travel to</span>
+          </label>
+          <div className="chips">
+            {BELGIAN_REGIONS.map((region) => {
+              const on = mobility.includes(region.code);
+              return (
+                <button
+                  key={region.code}
+                  type="button"
+                  className={`chip ${on ? "on" : ""}`}
+                  aria-pressed={on}
+                  onClick={() =>
+                    setMobility((prev) =>
+                      prev.includes(region.code)
+                        ? prev.filter((c) => c !== region.code)
+                        : [...prev, region.code],
+                    )
+                  }
+                >
+                  {region.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div className="grid2">

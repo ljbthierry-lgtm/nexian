@@ -1,13 +1,24 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, type Availability, type Consents, type Taxonomy, api } from "../api";
 import { AvailabilityPill, Banner, ChipPicker, formatDate, relativeDays } from "../components";
+import {
+  BELGIAN_REGIONS,
+  GRADED_LANGUAGES,
+  LANGUAGE_LEVELS,
+  LANGUAGE_LEVEL_LABEL,
+  type LanguageLevel,
+  regionLabel,
+} from "../profileFields";
 
 interface PortalProfile {
   headline: string;
   years_experience: number | null;
+  years_relevant: number | null;
   skills: string[];
   industries: string[];
   languages: string[];
+  language_levels: Record<string, LanguageLevel>;
+  mobility: string[];
   daily_rate: number | null;
   currency: string;
   availability: Availability;
@@ -43,9 +54,12 @@ const PREVIEW_DATA: PortalMe = {
   profile: {
     headline: "Senior project manager — pharma & manufacturing",
     years_experience: 12,
+    years_relevant: 8,
     skills: ["Project management", "Change management", "Procurement"],
     industries: ["Pharma & life sciences", "Manufacturing"],
     languages: ["Dutch", "French", "English"],
+    language_levels: { Dutch: "native", French: "fluent", English: "good" },
+    mobility: ["brussels", "flanders"],
     daily_rate: 750,
     currency: "EUR",
     availability: "from_date",
@@ -224,13 +238,23 @@ export function Portal({ preview = false }: { preview?: boolean }) {
                 <Row label="Headline">{profile.headline || "—"}</Row>
                 <Row label="Experience">
                   {profile.years_experience !== null ? `${profile.years_experience} years` : "—"}
+                  {profile.years_relevant !== null ? ` · ${profile.years_relevant} relevant` : ""}
                 </Row>
                 <Row label="Day rate">
                   {profile.daily_rate !== null ? `€ ${profile.daily_rate}` : "—"}
                 </Row>
                 <Row label="Skills">{profile.skills.join(" · ") || "—"}</Row>
                 <Row label="Industries">{profile.industries.join(" · ") || "—"}</Row>
-                <Row label="Languages">{profile.languages.join(" · ") || "—"}</Row>
+                <Row label="Languages">
+                  {Object.keys(profile.language_levels ?? {}).length
+                    ? GRADED_LANGUAGES.filter((g) => profile.language_levels?.[g.key])
+                        .map((g) => `${g.label}: ${profile.language_levels[g.key]}`)
+                        .join(" · ")
+                    : profile.languages.join(" · ") || "—"}
+                </Row>
+                <Row label="Mobility">
+                  {profile.mobility?.length ? profile.mobility.map(regionLabel).join(" · ") : "—"}
+                </Row>
                 <Row label="Based in">
                   {profile.location || "—"}
                   {profile.remote_ok ? " · open to remote" : ""}
@@ -449,6 +473,7 @@ function EditForm({
     last_name: contact.last_name,
     headline: profile.headline,
     years_experience: profile.years_experience?.toString() ?? "",
+    years_relevant: profile.years_relevant?.toString() ?? "",
     daily_rate: profile.daily_rate?.toString() ?? "",
     // "unknown" only exists for legacy rows; the form always offers a real choice.
     availability: (profile.availability === "unknown" ? "now" : profile.availability) as
@@ -460,7 +485,12 @@ function EditForm({
   });
   const [skills, setSkills] = useState(profile.skills);
   const [industries, setIndustries] = useState(profile.industries);
-  const [languages, setLanguages] = useState(profile.languages);
+  const gradedKeys = new Set<string>(GRADED_LANGUAGES.map((g) => g.key));
+  const [languages, setLanguages] = useState(profile.languages.filter((l) => !gradedKeys.has(l)));
+  const [langLevels, setLangLevels] = useState<Record<string, LanguageLevel>>(
+    profile.language_levels ?? {},
+  );
+  const [mobility, setMobility] = useState<string[]>(profile.mobility ?? []);
 
   return (
     <form
@@ -472,6 +502,7 @@ function EditForm({
           last_name: f.last_name,
           headline: f.headline,
           years_experience: f.years_experience ? Number(f.years_experience) : null,
+          years_relevant: f.years_relevant ? Number(f.years_relevant) : null,
           daily_rate: f.daily_rate ? Number(f.daily_rate) : null,
           availability: f.availability,
           available_from: f.availability === "from_date" ? f.available_from || null : null,
@@ -481,6 +512,8 @@ function EditForm({
           skills,
           industries,
           languages,
+          language_levels: langLevels,
+          mobility,
         });
       }}
     >
@@ -503,7 +536,7 @@ function EditForm({
           />
         </div>
         <div className="field">
-          <label htmlFor="e-yr">Years of experience</label>
+          <label htmlFor="e-yr">Years of experience (total)</label>
           <input
             id="e-yr"
             type="number"
@@ -511,6 +544,17 @@ function EditForm({
             max={70}
             value={f.years_experience}
             onChange={(e) => setF({ ...f, years_experience: e.target.value })}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="e-yrr">Years of relevant experience</label>
+          <input
+            id="e-yrr"
+            type="number"
+            min={0}
+            max={70}
+            value={f.years_relevant}
+            onChange={(e) => setF({ ...f, years_relevant: e.target.value })}
           />
         </div>
         <div className="field">
@@ -588,12 +632,68 @@ function EditForm({
       </div>
       <div className="field">
         <label>Languages</label>
+        <div className="lang-grid">
+          {GRADED_LANGUAGES.map((lang) => (
+            <div key={lang.key} className="lang-row">
+              <span className="lang-name">{lang.label}</span>
+              <select
+                aria-label={`${lang.label} level`}
+                value={langLevels[lang.key] ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setLangLevels((prev) => {
+                    const next = { ...prev };
+                    if (v) next[lang.key] = v as LanguageLevel;
+                    else delete next[lang.key];
+                    return next;
+                  });
+                }}
+              >
+                <option value="">Not applicable</option>
+                {LANGUAGE_LEVELS.map((level) => (
+                  <option key={level} value={level}>
+                    {LANGUAGE_LEVEL_LABEL[level]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
+        </div>
+        <label style={{ marginTop: 12 }}>Other languages</label>
         <ChipPicker
-          options={tax?.languages ?? []}
+          options={(tax?.languages ?? []).filter(
+            (l) => !GRADED_LANGUAGES.some((g) => g.label === l),
+          )}
           selected={languages}
           onChange={setLanguages}
           allowCustom
         />
+      </div>
+
+      <div className="field">
+        <label>Where can you work? (Belgian regions)</label>
+        <div className="chips">
+          {BELGIAN_REGIONS.map((region) => {
+            const on = mobility.includes(region.code);
+            return (
+              <button
+                key={region.code}
+                type="button"
+                className={`chip ${on ? "on" : ""}`}
+                aria-pressed={on}
+                onClick={() =>
+                  setMobility((prev) =>
+                    prev.includes(region.code)
+                      ? prev.filter((c) => c !== region.code)
+                      : [...prev, region.code],
+                  )
+                }
+              >
+                {region.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <label className="check">

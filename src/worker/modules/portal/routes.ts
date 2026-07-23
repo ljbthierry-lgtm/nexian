@@ -24,7 +24,17 @@ import { all, first, run } from "../../lib/db";
 import { parseLabels, serialiseLabels } from "../../lib/labels";
 import { badRequest, notFound } from "../../lib/errors";
 import { suppressContact } from "../../lib/suppress";
+import { cleanLanguageLevels, cleanMobility, languagesFromLevels } from "../../lib/profileFields";
 import { requirePortal } from "../../middleware/auth";
+
+/** D1 gives back a string; a corrupt value must not throw the whole load. */
+function safeJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
 import { revokeTokens } from "../notifications/tokens";
 import { endPortalSession, revokePortalSessions } from "./session";
 
@@ -34,9 +44,12 @@ portalRoutes.use("*", requirePortal());
 interface ProfileRow {
   headline: string;
   years_experience: number | null;
+  years_relevant: number | null;
   skills: string;
   industries: string;
   languages: string;
+  language_levels: string;
+  mobility: string;
   daily_rate: number | null;
   currency: string;
   availability: string;
@@ -55,7 +68,8 @@ interface ProfileRow {
 async function loadProfile(db: D1Database, contactId: string) {
   const row = await first<ProfileRow>(
     db,
-    `SELECT headline, years_experience, skills, industries, languages, daily_rate, currency,
+    `SELECT headline, years_experience, years_relevant, skills, industries, languages,
+            language_levels, mobility, daily_rate, currency,
             availability, available_from, location, remote_ok, freelancer_note,
             cv_filename, cv_size, cv_uploaded_at, registered_at, updated_at, last_confirmed_at
      FROM profiles WHERE contact_id = ?`,
@@ -67,6 +81,8 @@ async function loadProfile(db: D1Database, contactId: string) {
     skills: parseLabels(row.skills),
     industries: parseLabels(row.industries),
     languages: parseLabels(row.languages),
+    language_levels: cleanLanguageLevels(safeJson(row.language_levels)),
+    mobility: cleanMobility(safeJson(row.mobility)),
     remote_ok: row.remote_ok === 1,
   };
 }
@@ -85,9 +101,12 @@ const profileSchema = z.object({
   linkedin_url: z.string().trim().max(300).nullable().optional(),
   headline: z.string().trim().max(200).optional(),
   years_experience: z.number().int().min(0).max(70).nullable().optional(),
+  years_relevant: z.number().int().min(0).max(70).nullable().optional(),
   skills: z.array(z.string().trim().min(1).max(80)).max(30).optional(),
   industries: z.array(z.string().trim().min(1).max(80)).max(30).optional(),
   languages: z.array(z.string().trim().min(1).max(40)).max(15).optional(),
+  language_levels: z.record(z.string(), z.string()).optional(),
+  mobility: z.array(z.string()).max(10).optional(),
   daily_rate: z.number().int().min(0).max(10000).nullable().optional(),
   availability: z.enum(["now", "from_date", "not_available"]).optional(),
   available_from: z
@@ -143,9 +162,18 @@ portalRoutes.patch("/profile", async (c) => {
   };
   if (input.headline !== undefined) set("headline", input.headline);
   if (input.years_experience !== undefined) set("years_experience", input.years_experience);
+  if (input.years_relevant !== undefined) set("years_relevant", input.years_relevant);
   if (input.skills !== undefined) set("skills", serialiseLabels(input.skills));
   if (input.industries !== undefined) set("industries", serialiseLabels(input.industries));
-  if (input.languages !== undefined) set("languages", serialiseLabels(input.languages));
+  if (input.language_levels !== undefined) {
+    const levels = cleanLanguageLevels(input.language_levels);
+    set("language_levels", JSON.stringify(levels));
+    // Keep the flat list in step with the grades — it is what the pool filters.
+    set("languages", serialiseLabels(languagesFromLevels(levels, input.languages ?? [])));
+  } else if (input.languages !== undefined) {
+    set("languages", serialiseLabels(input.languages));
+  }
+  if (input.mobility !== undefined) set("mobility", JSON.stringify(cleanMobility(input.mobility)));
   if (input.daily_rate !== undefined) set("daily_rate", input.daily_rate);
   if (input.availability !== undefined) set("availability", input.availability);
   if (input.available_from !== undefined) set("available_from", input.available_from);

@@ -511,7 +511,8 @@ input[type="checkbox"] {
 .chip:hover {
   border-color: var(--accent);
 }
-.chip[aria-pressed="true"] {
+.chip[aria-pressed="true"],
+.chip.on {
   background: var(--accent-soft);
   border-color: var(--accent);
   color: var(--accent-deep);
@@ -520,6 +521,28 @@ input[type="checkbox"] {
 .chip:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+/* Language proficiency grid: language name beside a level selector. */
+.lang-grid {
+  display: grid;
+  gap: 8px;
+}
+.lang-row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  align-items: center;
+  gap: 12px;
+}
+.lang-row .lang-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+@media (max-width: 480px) {
+  .lang-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
 }
 
 .upload {

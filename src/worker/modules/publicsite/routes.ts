@@ -16,6 +16,7 @@ import { all, first, run, uid } from "../../lib/db";
 import { ALLOWED_CV_TYPES, MAX_CV_BYTES, isAcceptableCv, putCv } from "../../lib/cvStore";
 import { serialiseLabels } from "../../lib/labels";
 import { linkedinKey } from "../../lib/linkedinKey";
+import { cleanLanguageLevels, cleanMobility, languagesFromLevels } from "../../lib/profileFields";
 import { badRequest, tooManyRequests } from "../../lib/errors";
 import { log } from "../../lib/log";
 import { RATE_LIMITS, clientIp, hitRateLimit } from "../../lib/rateLimit";
@@ -34,9 +35,12 @@ const registerSchema = z.object({
   linkedin_url: z.string().trim().max(300).optional(),
   headline: z.string().trim().max(200).optional(),
   years_experience: z.number().int().min(0).max(70).optional(),
+  years_relevant: z.number().int().min(0).max(70).optional(),
   skills: z.array(z.string().trim().min(1).max(80)).max(30).default([]),
   industries: z.array(z.string().trim().min(1).max(80)).max(30).default([]),
   languages: z.array(z.string().trim().min(1).max(40)).max(15).default([]),
+  language_levels: z.record(z.string(), z.string()).optional(),
+  mobility: z.array(z.string()).max(10).optional(),
   daily_rate: z.number().int().min(0).max(10000).optional(),
   availability: z.enum(["now", "from_date", "not_available"]),
   available_from: z
@@ -134,6 +138,8 @@ publicRoutes.post("/register", async (c) => {
   if (input.availability === "from_date" && !input.available_from) {
     throw badRequest("Please give the date you become available.", "date_required");
   }
+  const levels = cleanLanguageLevels(input.language_levels);
+  const mobility = cleanMobility(input.mobility);
   if (cv && !isAcceptableCv(cv.name, cv.type)) {
     throw badRequest("Please upload a PDF or Word document as your CV.");
   }
@@ -300,16 +306,19 @@ publicRoutes.post("/register", async (c) => {
 
   await run(
     c.env.DB,
-    `INSERT INTO profiles (contact_id, headline, years_experience, skills, industries, languages,
-       daily_rate, availability, available_from, location, remote_ok, freelancer_note,
-       last_confirmed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+    `INSERT INTO profiles (contact_id, headline, years_experience, years_relevant, skills, industries,
+       languages, language_levels, mobility, daily_rate, availability, available_from, location,
+       remote_ok, freelancer_note, last_confirmed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
     contactId,
     input.headline ?? "",
     input.years_experience ?? null,
+    input.years_relevant ?? null,
     serialiseLabels(input.skills),
     serialiseLabels(input.industries),
-    serialiseLabels(input.languages),
+    serialiseLabels(languagesFromLevels(levels, input.languages)),
+    JSON.stringify(levels),
+    JSON.stringify(mobility),
     input.daily_rate ?? null,
     input.availability,
     input.available_from ?? null,
