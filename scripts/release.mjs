@@ -186,4 +186,5 @@ if (NO_PUSH) {
   }
 }
 
-say(`Done: ${version} is deployed, saved under releases/${version}/, tagged, and committed.`);
+const doneVerb = NO_DEPLOY ? "recorded (not re-deployed)" : "deployed";
+say(`Done: ${version} ${doneVerb}, saved under releases/${version}/, tagged, and committed.`);
