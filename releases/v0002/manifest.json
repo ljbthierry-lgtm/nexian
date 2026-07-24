@@ -1,0 +1,12 @@
+{
+  "version": "v0002",
+  "date": "2026-07-24T21:15:39.889Z",
+  "branch": "main",
+  "gitSha": "f435acc259fe311c99b19d60ca7f8ccdbda1879d",
+  "gitShaShort": "f435acc259",
+  "cloudflareVersionId": "6bcb4d25-9bce-4afa-bc65-d53ca74380a8",
+  "deployed": true,
+  "workerBytes": 386286,
+  "note": "pool faceted filters, source label, channel priority",
+  "tool": "scripts/release.mjs"
+}

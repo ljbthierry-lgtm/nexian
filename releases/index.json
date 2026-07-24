@@ -1,5 +1,13 @@
 [
   {
+    "version": "v0002",
+    "date": "2026-07-24T21:15:39.889Z",
+    "gitShaShort": "f435acc259",
+    "cloudflareVersionId": "6bcb4d25-9bce-4afa-bc65-d53ca74380a8",
+    "deployed": true,
+    "note": "pool faceted filters, source label, channel priority"
+  },
+  {
     "version": "v0001",
     "date": "2026-07-24T16:25:39.046Z",
     "gitShaShort": "5133ce4c7d",
