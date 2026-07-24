@@ -12,6 +12,12 @@ import { all, first, run, selectByChunks } from "../../lib/db";
 import { notFound } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
 import { createActionToken } from "../notifications/tokens";
+import {
+  type ChannelPriority,
+  linkedinChannelSql,
+  readChannelPriority,
+  writeChannelPriority,
+} from "./channel";
 import { decideOutreach } from "./eligibility";
 import { connectionNote, directMessage } from "./linkedin";
 import {
@@ -170,6 +176,7 @@ outreachRoutes.post("/linkedin/:id/sent", async (c) => {
 outreachRoutes.get("/wave", async (c) => {
   const state = await readWave(c.env.DB);
   const remaining = await countWaveRemaining(c.env.DB);
+  const channelPriority = await readChannelPriority(c.env.DB);
   // How many first-invites have gone out since the wave started — the progress
   // number on the card. Counted from the email log, the record of fact.
   const sent = state.startedAt
@@ -182,7 +189,22 @@ outreachRoutes.get("/wave", async (c) => {
         )
       )?.n ?? 0)
     : 0;
-  return c.json({ ...state, remaining, sentSinceStart: sent, nextRunUtc: "07:00" });
+  return c.json({
+    ...state,
+    remaining,
+    channelPriority,
+    sentSinceStart: sent,
+    nextRunUtc: "07:00",
+  });
+});
+
+/** Set the global preferred outreach channel (email or LinkedIn). */
+outreachRoutes.post("/channel", async (c) => {
+  const { priority } = z
+    .object({ priority: z.enum(["email", "linkedin"]) })
+    .parse(await c.req.json());
+  await writeChannelPriority(c.env.DB, priority as ChannelPriority);
+  return c.json({ ok: true, channelPriority: priority });
 });
 
 outreachRoutes.post("/wave", async (c) => {
@@ -213,12 +235,15 @@ outreachRoutes.post("/wave", async (c) => {
 
 /**
  * Everyone whose next touch would be a LinkedIn message: prospects with a
- * profile URL who still have touch budget and no email — plus those explicitly
- * queued by a recruiter. Ordered queued-first so "I'll do ten now" starts with
- * the ones somebody already picked.
+ * profile URL who still have touch budget — plus those explicitly queued by a
+ * recruiter. When email is the preferred channel, only people we cannot email
+ * (no address, or it bounced / complained) fall to LinkedIn; when LinkedIn is
+ * preferred, everyone with a profile appears here. Ordered queued-first so
+ * "I'll do ten now" starts with the ones somebody already picked.
  */
 outreachRoutes.get("/queue", async (c) => {
   const limit = Math.min(Number.parseInt(c.req.query("limit") ?? "50", 10) || 50, 200);
+  const preferred = await readChannelPriority(c.env.DB);
   const rows = await all<
     OutreachCandidateRow & { linkedin_url: string | null; linkedin_state: string }
   >(
@@ -234,6 +259,7 @@ outreachRoutes.get("/queue", async (c) => {
        AND ct.linkedin_state != 'sent'
        AND ct.outreach_count < ?
        AND NOT EXISTS (SELECT 1 FROM profiles p WHERE p.contact_id = ct.id)
+       ${linkedinChannelSql(preferred)}
      ORDER BY CASE ct.linkedin_state WHEN 'queued' THEN 0 ELSE 1 END,
               ct.email IS NOT NULL, ct.created_at ASC
      LIMIT ?`,

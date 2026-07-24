@@ -17,6 +17,7 @@ import type { Env } from "../../env";
 import { all, first, run } from "../../lib/db";
 import { EMAILABLE_SQL } from "../../lib/deliverability";
 import { log } from "../../lib/log";
+import { emailChannelSql, readChannelPriority } from "./channel";
 import { type OutreachCandidateRow, sendOutreachTo } from "./send";
 
 const SETTINGS_KEY = "invite_wave";
@@ -80,9 +81,12 @@ export function clampLimit(value: unknown): number {
 /**
  * First invitations only — follow-ups belong to their own nightly job. Email is
  * the wave's channel, so LinkedIn-only prospects never appear here; they are
- * the manual queue's population.
+ * the manual queue's population. When LinkedIn is the preferred channel, anyone
+ * who also has a profile is left to the queue too, so the wave never keeps
+ * re-selecting someone it is going to skip.
  */
-const WAVE_SELECT = `
+function waveSelect(preferred: "email" | "linkedin"): string {
+  return `
   SELECT ct.id, ct.email, ct.first_name, ct.last_name, ct.source, ct.suppressed,
          ct.anonymized_at, ct.outreach_count, ct.last_outreach_at,
          ct.email_status, ct.replied_at,
@@ -94,10 +98,16 @@ const WAVE_SELECT = `
     AND ct.replied_at IS NULL
     AND ct.outreach_count = 0
     AND NOT EXISTS (SELECT 1 FROM profiles p WHERE p.contact_id = ct.id)
+    ${emailChannelSql(preferred)}
   ORDER BY ct.created_at ASC`;
+}
 
 export async function countWaveRemaining(db: D1Database): Promise<number> {
-  const row = await first<{ n: number }>(db, `SELECT COUNT(*) AS n FROM (${WAVE_SELECT})`);
+  const preferred = await readChannelPriority(db);
+  const row = await first<{ n: number }>(
+    db,
+    `SELECT COUNT(*) AS n FROM (${waveSelect(preferred)})`,
+  );
   return row?.n ?? 0;
 }
 
@@ -110,7 +120,8 @@ export async function runInviteWave(
   if (!state.active) return { sent: 0, remaining: 0, finished: false };
 
   const batch = Math.min(state.dailyLimit, MAX_WAVE_PER_RUN);
-  const rows = await all<OutreachCandidateRow>(env.DB, `${WAVE_SELECT} LIMIT ?`, batch);
+  const preferred = await readChannelPriority(env.DB);
+  const rows = await all<OutreachCandidateRow>(env.DB, `${waveSelect(preferred)} LIMIT ?`, batch);
 
   let sent = 0;
   for (const row of rows) {

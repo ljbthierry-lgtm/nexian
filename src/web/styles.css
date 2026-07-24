@@ -835,6 +835,29 @@ input[type="checkbox"] {
   margin: 14px 0 4px;
 }
 
+/* Preferred-channel control on the invitation wave card. */
+.channel-pref {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+}
+.channel-pref label {
+  margin: 0;
+  white-space: nowrap;
+}
+.channel-pref select {
+  width: auto;
+}
+.channel-pref .sub {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
 /* ----------------------------------------------------------------- tables */
 
 .tablewrap {

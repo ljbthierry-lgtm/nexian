@@ -20,6 +20,7 @@ import { runRetentionSweep } from "./modules/admin/retention";
 import { sendEmail } from "./modules/notifications/resend";
 import { availabilityReminderEmail } from "./modules/notifications/templates";
 import { createActionToken } from "./modules/notifications/tokens";
+import { emailChannelSql, readChannelPriority } from "./modules/outreach/channel";
 import { sendOutreachTo } from "./modules/outreach/send";
 import { runInviteWave } from "./modules/outreach/wave";
 
@@ -56,6 +57,7 @@ export async function sendDueFollowUps(env: Env, now = new Date()): Promise<numb
   if (maxTouches < 2) return 0;
 
   const cutoff = new Date(now.getTime() - waitDays * 86400000).toISOString();
+  const preferred = await readChannelPriority(env.DB);
   const rows = await all<CandidateRow>(
     env.DB,
     `SELECT ct.id, ct.email, ct.first_name, ct.last_name, ct.source, ct.suppressed,
@@ -72,6 +74,7 @@ export async function sendDueFollowUps(env: Env, now = new Date()): Promise<numb
        AND ct.last_outreach_at < ?
        AND ct.linkedin_state != 'queued'
        AND NOT EXISTS (SELECT 1 FROM profiles p WHERE p.contact_id = ct.id)
+       ${emailChannelSql(preferred)}
      ORDER BY ct.last_outreach_at ASC
      LIMIT ?`,
     cutoff,

@@ -17,6 +17,7 @@ interface WaveStatus {
   startedAt: string | null;
   completedAt: string | null;
   remaining: number;
+  channelPriority: "email" | "linkedin";
   sentSinceStart: number;
   nextRunUtc: string;
 }
@@ -97,6 +98,22 @@ export function Invitations() {
       setFlash({ kind: "error", text: err instanceof ApiError ? err.message : "Could not update" });
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function setChannel(priority: "email" | "linkedin") {
+    try {
+      await api.post("/api/outreach/channel", { priority });
+      setFlash({
+        kind: "ok",
+        text:
+          priority === "email"
+            ? "Email is now the preferred channel. LinkedIn still covers anyone we can't email."
+            : "LinkedIn is now the preferred channel. Email still covers anyone without a profile.",
+      });
+      await load();
+    } catch (err) {
+      setFlash({ kind: "error", text: err instanceof ApiError ? err.message : "Could not update" });
     }
   }
 
@@ -212,6 +229,24 @@ export function Invitations() {
           moment they register or opt out. Batches above 40/day are capped at 40 — pacing keeps your
           emails out of spam folders.
         </p>
+        <div className="channel-pref">
+          <label htmlFor="channel-pref">
+            When someone has both an email and a LinkedIn profile
+          </label>
+          <select
+            id="channel-pref"
+            value={wave?.channelPriority ?? "email"}
+            disabled={!wave}
+            onChange={(e) => setChannel(e.target.value as "email" | "linkedin")}
+          >
+            <option value="email">Reach them by email first</option>
+            <option value="linkedin">Reach them on LinkedIn first</option>
+          </select>
+          <span className="sub">
+            The other channel is the fallback — nobody is left out, and the two-touch limit still
+            counts across both.
+          </span>
+        </div>
       </div>
 
       <div className="card">
