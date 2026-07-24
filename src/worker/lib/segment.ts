@@ -14,6 +14,10 @@ export interface Segment {
   skills?: string[];
   industries?: string[];
   languages?: string[];
+  /** Belgian region codes (see profileFields), matched against the stored JSON. */
+  mobility?: string[];
+  /** Work-regime codes: full_time / part_time. */
+  workRegime?: string[];
   availability?: ("now" | "from_date" | "not_available" | "unknown")[];
   /** Available now, or with a start date within N days. */
   availableWithinDays?: number;
@@ -61,6 +65,12 @@ export function buildPoolFilter(segment: Segment, today = new Date()): SqlFragme
 
   const languages = cleanList(segment.languages);
   if (languages.length) jsonArrayAnyOf("p.languages", languages, frag);
+
+  const mobility = cleanList(segment.mobility);
+  if (mobility.length) jsonArrayAnyOf("p.mobility", mobility, frag);
+
+  const workRegime = cleanList(segment.workRegime);
+  if (workRegime.length) jsonArrayAnyOf("p.work_regime", workRegime, frag);
 
   const availability = cleanList(segment.availability);
   if (availability.length) {

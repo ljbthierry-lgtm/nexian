@@ -37,6 +37,8 @@ export function segmentFromQuery(q: Record<string, string>): Segment {
     skills: list(q.skills),
     industries: list(q.industries),
     languages: list(q.languages),
+    mobility: list(q.mobility),
+    workRegime: list(q.workRegime),
     availability: list(q.availability) as Segment["availability"],
     availableWithinDays: num(q.availableWithinDays),
     rateMin: num(q.rateMin),

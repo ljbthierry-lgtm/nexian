@@ -221,7 +221,7 @@ export function Invitations() {
             <p className="sub">
               {queue.length
                 ? `${queue.length} people to message by hand — the app writes the message, you paste and send it. Faster with the browser extension (Settings → Browser extension): one click on their LinkedIn profile copies the right message.`
-                : "Nobody waiting. Prospects with a LinkedIn profile and touch budget appear here."}
+                : "Nobody waiting. Prospects with a LinkedIn profile who can still be contacted — under two touches, and no reply or opt-out yet — appear here."}
             </p>
           </div>
           <button type="button" className="btn ghost sm" onClick={() => setShowImport(true)}>

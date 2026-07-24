@@ -35,6 +35,21 @@ describe("pool filter", () => {
     expect(frag.params).toContain("2026-08-21");
   });
 
+  it("matches mobility regions against the stored JSON, any-of", () => {
+    const frag = buildPoolFilter({ mobility: ["antwerp", "brussels"] }, TODAY);
+    const clause = frag.where.find((w) => w.includes("p.mobility"));
+    expect(clause).toContain(`p.mobility LIKE '%"' || ? || '"%'`);
+    expect(clause).toContain(" OR ");
+    expect(frag.params).toEqual(expect.arrayContaining(["antwerp", "brussels"]));
+  });
+
+  it("matches work regime against the stored JSON", () => {
+    const frag = buildPoolFilter({ workRegime: ["part_time"] }, TODAY);
+    const clause = frag.where.find((w) => w.includes("p.work_regime"));
+    expect(clause).toContain(`p.work_regime LIKE '%"' || ? || '"%'`);
+    expect(frag.params).toContain("part_time");
+  });
+
   it("builds a rate window", () => {
     const frag = buildPoolFilter({ rateMin: 500, rateMax: 900 }, TODAY);
     expect(frag.params).toEqual(expect.arrayContaining([500, 900]));

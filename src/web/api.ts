@@ -133,6 +133,10 @@ export interface PoolMember {
   skills: string[];
   industries: string[];
   languages: string[];
+  mobility: string[];
+  work_regime: string[];
+  notice_period: string | null;
+  years_relevant: number | null;
   daily_rate: number | null;
   currency: string;
   availability: Availability;

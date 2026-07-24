@@ -35,6 +35,106 @@ export function Stat({
   );
 }
 
+export interface FilterOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * A compact multi-select dropdown for a filter bar: a trigger that reads
+ * "Skill: any" / "Skill: React" / "Skill: 3", opening a checklist. Long lists
+ * get a search box. Nothing is applied on a separate button — ticking a box
+ * changes the filter live, the way a good faceted search does.
+ */
+export function MultiFilter({
+  label,
+  options,
+  selected,
+  onChange,
+  searchable,
+}: {
+  label: string;
+  options: FilterOption[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+  searchable?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const toggle = (value: string) =>
+    onChange(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value]);
+
+  const q = query.trim().toLowerCase();
+  const shown = q ? options.filter((o) => o.label.toLowerCase().includes(q)) : options;
+  const labelOf = (value: string) => options.find((o) => o.value === value)?.label ?? value;
+  const summary =
+    selected.length === 0
+      ? `${label}: any`
+      : selected.length === 1
+        ? `${label}: ${labelOf(selected[0]!)}`
+        : `${label}: ${selected.length}`;
+
+  return (
+    <div className="filter-select" ref={ref}>
+      <button
+        type="button"
+        className={`filter-trigger ${selected.length ? "on" : ""}`}
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="ft-label">{summary}</span>
+        <span className="ft-caret" aria-hidden="true">
+          ▾
+        </span>
+      </button>
+      {open && (
+        <div className="filter-pop">
+          {searchable && (
+            <input
+              className="filter-search"
+              type="text"
+              value={query}
+              placeholder={`Search ${label.toLowerCase()}…`}
+              onChange={(e) => setQuery(e.target.value)}
+              // eslint-disable-next-line jsx-a11y/no-autofocus
+              autoFocus
+            />
+          )}
+          <div className="filter-opts">
+            {shown.map((o) => (
+              <label key={o.value} className="filter-opt">
+                <input
+                  type="checkbox"
+                  checked={selected.includes(o.value)}
+                  onChange={() => toggle(o.value)}
+                />
+                <span>{o.label}</span>
+              </label>
+            ))}
+            {shown.length === 0 && <div className="filter-none">No matches</div>}
+          </div>
+          {selected.length > 0 && (
+            <button type="button" className="filter-clear" onClick={() => onChange([])}>
+              Clear {label.toLowerCase()}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * A searchable multi-select for long option lists (skills, industries,
  * certifications). Selected values show as removable tags; typing filters a
