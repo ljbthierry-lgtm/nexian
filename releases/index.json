@@ -1,0 +1,10 @@
+[
+  {
+    "version": "v0001",
+    "date": "2026-07-24T16:25:39.046Z",
+    "gitShaShort": "5133ce4c7d",
+    "cloudflareVersionId": "16dd3166-7313-4017-b2ba-0410300e4f23",
+    "deployed": false,
+    "note": "baseline: 3 security fixes; worker identical to live CF 16dd3166 (built from 94ed016)"
+  }
+]

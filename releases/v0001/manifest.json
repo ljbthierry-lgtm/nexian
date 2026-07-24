@@ -1,0 +1,12 @@
+{
+  "version": "v0001",
+  "date": "2026-07-24T16:25:39.046Z",
+  "branch": "main",
+  "gitSha": "5133ce4c7d1bd24606b63ca622595aae6ae163c2",
+  "gitShaShort": "5133ce4c7d",
+  "cloudflareVersionId": "16dd3166-7313-4017-b2ba-0410300e4f23",
+  "deployed": false,
+  "workerBytes": 384121,
+  "note": "baseline: 3 security fixes; worker identical to live CF 16dd3166 (built from 94ed016)",
+  "tool": "scripts/release.mjs"
+}
