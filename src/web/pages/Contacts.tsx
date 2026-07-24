@@ -15,6 +15,7 @@ import {
   Stat,
   StagePill,
   formatDate,
+  humanizeToken,
   relativeDays,
 } from "../components";
 
@@ -161,7 +162,7 @@ export function Contacts() {
                       </div>
                     </td>
                     <td className="sub">
-                      {ct.source}
+                      {humanizeToken(ct.source)}
                       {ct.source_note ? <div className="sub">{ct.source_note}</div> : null}
                     </td>
                     <td>
@@ -281,7 +282,7 @@ function ContactDetail({
                 <strong>Source</strong>
               </td>
               <td>
-                {ct.source}
+                {humanizeToken(ct.source)}
                 {ct.source_note ? ` — ${ct.source_note}` : ""}
               </td>
             </tr>
@@ -368,7 +369,7 @@ function ContactDetail({
                       {row.granted ? "granted" : "withdrawn"}
                     </span>
                   </td>
-                  <td className="sub">{row.source.replace(/_/g, " ")}</td>
+                  <td className="sub">{humanizeToken(row.source)}</td>
                 </tr>
               ))}
             </tbody>

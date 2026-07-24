@@ -231,6 +231,15 @@ export function ChipPicker({
   );
 }
 
+/**
+ * Turn a stored enum token into something a person reads: `self_signup` →
+ * `self signup`. For values without a curated label (contact source, consent
+ * source), so the underscore form never reaches the screen.
+ */
+export function humanizeToken(value: string): string {
+  return value.replace(/_/g, " ");
+}
+
 export const STAGE_LABEL: Record<Stage, string> = {
   prospect: "Prospect",
   contacted: "Contacted",
