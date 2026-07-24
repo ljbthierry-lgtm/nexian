@@ -110,7 +110,10 @@ export function buildPoolFilter(segment: Segment, today = new Date()): SqlFragme
 
   if (typeof segment.staleDays === "number" && segment.staleDays > 0) {
     const cutoff = new Date(today.getTime() - segment.staleDays * 86400000).toISOString();
-    frag.where.push("p.updated_at < ?");
+    // Match the "not confirmed in N months" stat: fall back to updated_at only
+    // when the freelancer has never explicitly confirmed, so the card's count and
+    // the filtered list are the same set.
+    frag.where.push("COALESCE(p.last_confirmed_at, p.updated_at) < ?");
     frag.params.push(cutoff);
   }
 
