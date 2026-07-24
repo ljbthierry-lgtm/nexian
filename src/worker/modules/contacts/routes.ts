@@ -8,7 +8,7 @@ import { logActivity } from "../../lib/activity";
 import { consentHistory, consentsFor, currentConsents } from "../../lib/consent";
 import { mapImportRows, parseCsv, toCsv } from "../../lib/csv";
 import { cvResponse, getCv } from "../../lib/cvStore";
-import { all, first, run, uid } from "../../lib/db";
+import { all, first, run, selectByChunks, uid } from "../../lib/db";
 import { parseLabels } from "../../lib/labels";
 import { badRequest, notFound } from "../../lib/errors";
 import { clientIp } from "../../lib/rateLimit";
@@ -424,26 +424,22 @@ contactRoutes.post("/import", async (c) => {
   const emails = parsed.rows.flatMap((r) => (r.email ? [r.email] : []));
   const liKeys = parsed.rows.flatMap((r) => (r.linkedin_key ? [r.linkedin_key] : []));
   const existingEmails = new Set(
-    emails.length
-      ? (
-          await all<{ email: string }>(
-            c.env.DB,
-            `SELECT email FROM contacts WHERE email IN (${emails.map(() => "?").join(", ")})`,
-            ...emails,
-          )
-        ).map((r) => r.email)
-      : [],
+    (
+      await selectByChunks<{ email: string }>(
+        c.env.DB,
+        (ph) => `SELECT email FROM contacts WHERE email IN (${ph})`,
+        emails,
+      )
+    ).map((r) => r.email),
   );
   const existingKeys = new Set(
-    liKeys.length
-      ? (
-          await all<{ linkedin_key: string }>(
-            c.env.DB,
-            `SELECT linkedin_key FROM contacts WHERE linkedin_key IN (${liKeys.map(() => "?").join(", ")})`,
-            ...liKeys,
-          )
-        ).map((r) => r.linkedin_key)
-      : [],
+    (
+      await selectByChunks<{ linkedin_key: string }>(
+        c.env.DB,
+        (ph) => `SELECT linkedin_key FROM contacts WHERE linkedin_key IN (${ph})`,
+        liKeys,
+      )
+    ).map((r) => r.linkedin_key),
   );
 
   // People who previously opted out stay out, even though their record may be

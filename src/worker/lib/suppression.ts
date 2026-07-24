@@ -7,7 +7,7 @@
  * opt-out survives the record, without us storing the address itself.
  */
 import { sha256Hex } from "./crypto";
-import { all, first, run } from "./db";
+import { first, run, selectByChunks } from "./db";
 
 export function normaliseEmail(email: string): string {
   return email.trim().toLowerCase();
@@ -86,17 +86,12 @@ export async function filterSuppressedHashes(
   db: D1Database,
   hashes: string[],
 ): Promise<Set<string>> {
-  const blocked = new Set<string>();
-  for (let i = 0; i < hashes.length; i += 200) {
-    const slice = hashes.slice(i, i + 200);
-    const rows = await all<{ email_hash: string }>(
-      db,
-      `SELECT email_hash FROM suppression_list WHERE email_hash IN (${slice.map(() => "?").join(", ")})`,
-      ...slice,
-    );
-    for (const row of rows) blocked.add(row.email_hash);
-  }
-  return blocked;
+  const rows = await selectByChunks<{ email_hash: string }>(
+    db,
+    (ph) => `SELECT email_hash FROM suppression_list WHERE email_hash IN (${ph})`,
+    hashes,
+  );
+  return new Set(rows.map((r) => r.email_hash));
 }
 
 /** Convenience wrapper for the email-only callers that predate LinkedIn support. */

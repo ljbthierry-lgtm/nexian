@@ -8,7 +8,7 @@ import { z } from "zod";
 import type { AppContext } from "../../env";
 import { logActivity } from "../../lib/activity";
 import { resolveBaseUrl } from "../../lib/baseUrl";
-import { all, first, run } from "../../lib/db";
+import { all, first, run, selectByChunks } from "../../lib/db";
 import { notFound } from "../../lib/errors";
 import { requireAuth } from "../../middleware/auth";
 import { createActionToken } from "../notifications/tokens";
@@ -33,10 +33,10 @@ outreachRoutes.post("/send", async (c) => {
     .object({ contactIds: z.array(z.string().min(1)).min(1).max(200) })
     .parse(await c.req.json());
 
-  const rows = await all<CandidateRow>(
+  const rows = await selectByChunks<CandidateRow>(
     c.env.DB,
-    `${CANDIDATE_SELECT} WHERE ct.id IN (${contactIds.map(() => "?").join(", ")})`,
-    ...contactIds,
+    (ph) => `${CANDIDATE_SELECT} WHERE ct.id IN (${ph})`,
+    contactIds,
   );
   const user = c.get("user");
   const results = [];

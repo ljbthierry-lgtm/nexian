@@ -16,6 +16,7 @@ import { all, first, run, uid } from "../../lib/db";
 import { ALLOWED_CV_TYPES, MAX_CV_BYTES, isAcceptableCv, putCv } from "../../lib/cvStore";
 import { serialiseLabels } from "../../lib/labels";
 import { linkedinKey } from "../../lib/linkedinKey";
+import { canAdoptPrefill } from "../../lib/prefill";
 import {
   cleanLanguageLevels,
   cleanMobility,
@@ -189,22 +190,31 @@ publicRoutes.post("/register", async (c) => {
   }
   // A personalised invitation token binds the submission to the record the
   // link was made for — that is what turns "create yourself" into "update
-  // yourself". The anti-takeover rule stays primary: if the email or LinkedIn
-  // they typed belongs to a DIFFERENT record, the token is ignored and the
-  // anonymous-path guards apply unchanged, so a leaked link plus somebody
-  // else's address still gets an attacker nothing.
+  // yourself". The anti-takeover rule stays primary (see canAdoptPrefill): the
+  // token is ignored when what they typed belongs to a DIFFERENT record, AND
+  // when it would rewrite an invited contact's established email — so a leaked
+  // link plus a stranger's own new address still gets an attacker nothing but a
+  // brand-new, separate record.
   let inviteChannel: string | null = null;
   let tokenBound = false;
   if (input.invite) {
     const tokenRow = await peekActionToken(c.env.DB, input.invite);
     if (tokenRow?.purpose === "join_prefill" && tokenRow.contact_id) {
-      const tokenContact = await first<{ id: string; suppressed: number }>(
+      const tokenContact = await first<{ id: string; suppressed: number; email: string | null }>(
         c.env.DB,
-        `SELECT id, suppressed FROM contacts WHERE id = ? AND anonymized_at IS NULL`,
+        `SELECT id, suppressed, email FROM contacts WHERE id = ? AND anonymized_at IS NULL`,
         tokenRow.contact_id,
       );
-      if (tokenContact && (!existing || existing.id === tokenContact.id)) {
-        existing = tokenContact;
+      if (
+        tokenContact &&
+        canAdoptPrefill({
+          existingId: existing?.id ?? null,
+          tokenContactId: tokenContact.id,
+          tokenContactEmail: tokenContact.email?.toLowerCase() ?? null,
+          submittedEmail: email,
+        })
+      ) {
+        existing = { id: tokenContact.id, suppressed: tokenContact.suppressed };
         tokenBound = true;
         try {
           inviteChannel = (JSON.parse(tokenRow.payload) as { channel?: string }).channel ?? null;
@@ -287,11 +297,13 @@ publicRoutes.post("/register", async (c) => {
 
   const contactId = existing?.id ?? uid();
   if (existing) {
-    // A prospect we had already added is now registering themselves.
+    // A prospect we had already added is now registering themselves. Belt to the
+    // canAdoptPrefill guard: COALESCE means an on-file email is never overwritten
+    // here — only an email-less prospect (the LinkedIn-only case) has one set.
     await run(
       c.env.DB,
       `UPDATE contacts
-         SET email = ?, first_name = ?, last_name = ?, phone = COALESCE(?, phone),
+         SET email = COALESCE(email, ?), first_name = ?, last_name = ?, phone = COALESCE(?, phone),
              linkedin_url = COALESCE(?, linkedin_url),
              linkedin_key = COALESCE(?, linkedin_key),
              stage = CASE WHEN stage IN ('prospect', 'contacted') THEN 'registered' ELSE stage END,

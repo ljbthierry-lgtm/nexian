@@ -9,7 +9,7 @@
  *   - only the freelancer can grant marketing consent, through the platform.
  */
 import type { ConsentPurpose, Env } from "../env";
-import { all, run, uid } from "./db";
+import { all, run, selectByChunks, uid } from "./db";
 import { logActivity } from "./activity";
 
 export const ALL_PURPOSES: ConsentPurpose[] = ["data_processing", "mission_alerts", "news"];
@@ -100,11 +100,14 @@ export async function consentsFor(
 ): Promise<Map<string, ConsentState>> {
   const map = new Map<string, ConsentState>();
   if (!contactIds.length) return map;
-  const placeholders = contactIds.map(() => "?").join(", ");
-  const rows = await all<{ contact_id: string; purpose: ConsentPurpose; granted: number }>(
+  const rows = await selectByChunks<{
+    contact_id: string;
+    purpose: ConsentPurpose;
+    granted: number;
+  }>(
     db,
-    `SELECT contact_id, purpose, granted FROM consent_current WHERE contact_id IN (${placeholders})`,
-    ...contactIds,
+    (ph) => `SELECT contact_id, purpose, granted FROM consent_current WHERE contact_id IN (${ph})`,
+    contactIds,
   );
   for (const id of contactIds) map.set(id, { ...NO_CONSENT });
   for (const row of rows) {

@@ -154,12 +154,41 @@ extRoutes.post("/sent", async (c) => {
   const { contactId } = z.object({ contactId: z.string().min(1) }).parse(await c.req.json());
   const user = c.get("user") as SessionUser;
 
-  const exists = await first<{ id: string }>(
+  const row = await first<{
+    id: string;
+    suppressed: number;
+    outreach_count: number;
+    last_outreach_at: string | null;
+    replied_at: string | null;
+    has_profile: number;
+  }>(
     c.env.DB,
-    `SELECT id FROM contacts WHERE id = ? AND anonymized_at IS NULL`,
+    `SELECT ct.id, ct.suppressed, ct.outreach_count, ct.last_outreach_at, ct.replied_at,
+            (SELECT COUNT(*) FROM profiles p WHERE p.contact_id = ct.id) AS has_profile
+     FROM contacts ct WHERE ct.id = ? AND ct.anonymized_at IS NULL`,
     contactId,
   );
-  if (!exists) return c.json({ ok: false, error: "not_found" }, 404);
+  if (!row) return c.json({ ok: false, error: "not_found" }, 404);
+
+  // The 2-touch cap is shared with email and is a HARD stop, so re-decide here on
+  // the server exactly as sendOutreachTo does. The extension's disabled button is
+  // a convenience; this is the control. A stale or hand-made call can no longer
+  // record a touch past the cap, or onto someone suppressed, registered, or who
+  // has already replied.
+  const decision = decideOutreach(
+    {
+      suppressed: row.suppressed === 1,
+      anonymized: false,
+      hasProfile: row.has_profile > 0,
+      outreachCount: row.outreach_count,
+      lastOutreachAt: row.last_outreach_at,
+      replied: row.replied_at !== null,
+    },
+    policyOf(c.env),
+  );
+  if (!decision.allowed) {
+    return c.json({ ok: false, error: "not_allowed", reason: decision.reason }, 409);
+  }
 
   await run(
     c.env.DB,
