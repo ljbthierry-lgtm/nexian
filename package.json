@@ -16,6 +16,8 @@
     "migrate:local": "wrangler d1 migrations apply nexian_talent --local",
     "migrate:prod": "wrangler d1 migrations apply nexian_talent --remote",
     "deploy": "npm run build && wrangler deploy",
+    "release": "node scripts/release.mjs",
+    "release:dry": "node scripts/release.mjs --dry-run",
     "ci": "npm run format:check && npm run check && npm run test && npm run build"
   },
   "dependencies": {
